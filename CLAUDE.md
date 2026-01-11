@@ -2,77 +2,124 @@
 
 ## Project Overview
 
-This project creates an integration between ownCloud Infinite Scale (oCIS) and PhotoPrism for automated photo processing.
+An oCIS web extension that adds a "PhotoView" to the file browser, displaying photos grouped by date with non-image files filtered out.
+
+## Phase 1 Goals
+
+1. Add a third view option called "PhotoView" (alongside List and Icon views)
+2. Filter to show only image files (jpg, jpeg, png, gif, webp, heic)
+3. Group photos by date (using file modification time)
+4. Clean, focused photo browsing experience
 
 ## Environment
 
 - **Development Server**: core-faure.ca (GCP)
 - **User**: AIScripts
-- **oCIS Instance**: https://cloud.faure.ca (running locally on core-faure)
-- **PhotoPrism**: TBD (will need separate server due to resource constraints)
+- **oCIS Instance**: https://cloud.faure.ca
+- **oCIS Version**: Check with `curl -s https://cloud.faure.ca/.well-known/openid-configuration`
 
-## Key APIs
+## Technology Stack
 
-### oCIS APIs
-- **WebDAV**: `https://cloud.faure.ca/dav/files/{username}/`
-- **Graph API**: `https://cloud.faure.ca/graph/v1.0/`
-- **CS3 API**: Internal gRPC-based API (for deep integration)
+- **Language**: TypeScript
+- **Framework**: Vue 3 (Composition API)
+- **Build Tool**: Vite
+- **Package Manager**: pnpm
+- **Testing**: Vitest
 
-### PhotoPrism APIs
-- **REST API**: `http://{photoprism-host}/api/v1/`
-- Note: Face data only available per-photo, not bulk listings
+## Key oCIS Extension Concepts
 
-## Development Approach
-
-1. **Start with Option B** (Middleware Bridge) - simpler to implement and maintain
-2. Use Python or Go for the bridge service
-3. Test with rclone WebDAV mounts first as proof of concept
-
-## File Structure (Planned)
-
-```
-ocis-photoprism-addon/
-├── README.md
-├── CLAUDE.md (this file)
-├── bridge/                 # Middleware service
-│   ├── main.py            # Entry point
-│   ├── ocis_client.py     # oCIS WebDAV/Graph API client
-│   ├── photoprism_client.py # PhotoPrism API client
-│   └── config.yaml        # Configuration
-├── docs/                   # Documentation
-└── tests/                  # Test suite
+### Extension Registration
+Extensions register via `index.ts` exporting an `appInfo` object:
+```typescript
+export default {
+  id: 'photo-addon',
+  name: 'Photo View',
+  // ... extension points
+}
 ```
 
-## oCIS Configuration Notes
+### File Structure for oCIS Web Apps
+```
+dist/
+├── manifest.json    # Required - defines entrypoint
+├── index.js         # Main bundle
+└── (other assets)
+```
 
-- oCIS uses decomposed storage (not traditional filesystem)
-- Files must be accessed via WebDAV or CS3 API, not direct filesystem
-- Admin credentials in `/etc/ocis/ocis.yaml`
-- Impersonation available via auth-app tokens
+### manifest.json Format
+```json
+{
+  "entrypoint": "index.js",
+  "config": {}
+}
+```
 
-## Commands to Remember
+## Development Commands
 
 ```bash
-# Test oCIS WebDAV access
-curl -u 'user:password' -X PROPFIND 'https://cloud.faure.ca/dav/files/username/'
+# Install dependencies
+pnpm install
 
-# List oCIS users via Graph API
-curl -u 'admin:password' 'https://cloud.faure.ca/graph/v1.0/users'
+# Development build (watch mode)
+pnpm build:w
 
-# Generate impersonation token (30 days)
-curl -u 'admin:password' -X POST 'https://cloud.faure.ca/auth-app/tokens?expiry=720h&userName=username'
+# Production build
+pnpm build
+
+# Run tests
+pnpm test:unit
+
+# Lint
+pnpm lint
 ```
 
-## Coding Standards
+## oCIS Web Extension Points
 
-- Use type hints in Python
-- Document all API interactions
-- Handle errors gracefully with retries
-- Log operations for debugging
-- Keep credentials in config files, not code
+Key extension points we'll use:
+- `folderView` - Register our PhotoView as a folder view option
+- `quickActions` - Optional: add photo-specific actions
 
-## Testing
+## Implementation Notes
 
-- Test with a small subset of photos first
-- Verify metadata appears correctly in oCIS web UI
-- Test with multiple users to ensure proper isolation
+### Detecting Image Files
+Use MIME types or file extensions:
+```typescript
+const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp', 'svg']
+
+function isImage(file: Resource): boolean {
+  const ext = file.name.split('.').pop()?.toLowerCase()
+  return ext ? IMAGE_EXTENSIONS.includes(ext) : false
+}
+```
+
+### Grouping by Date
+```typescript
+function groupByDate(files: Resource[]): Map<string, Resource[]> {
+  // Group by YYYY-MM-DD from mtime
+}
+```
+
+### oCIS Client Library
+Use `@ownclouders/web-client` for API interactions:
+```typescript
+import { webdav } from '@ownclouders/web-client'
+```
+
+## Deployment to cloud.faure.ca
+
+1. Build: `pnpm build`
+2. Copy to oCIS: `scp -r dist/* user@core-faure:/path/to/ocis/web/apps/photo-addon/`
+3. Restart oCIS or reload web interface
+
+## Testing Strategy
+
+1. Unit tests for grouping/filtering logic
+2. Manual testing on cloud.faure.ca
+3. Test with various image types and dates
+
+## Resources
+
+- [oCIS Extension System](https://owncloud.dev/clients/web/extension-system/)
+- [web-app-skeleton](https://github.com/owncloud/web-app-skeleton)
+- [web-extensions repo](https://github.com/owncloud/web-extensions)
+- [@ownclouders/web-client](https://www.npmjs.com/package/@ownclouders/web-client)

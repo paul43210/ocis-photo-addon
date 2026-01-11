@@ -1,0 +1,6 @@
+{
+  "entrypoint": "index.js",
+  "config": {
+    "supportedExtensions": ["jpg", "jpeg", "png", "gif", "webp", "heic"]
+  }
+}
