@@ -9,13 +9,17 @@ export default defineConfig({
       entry: resolve(__dirname, 'src/index.ts'),
       name: 'PhotoAddon',
       fileName: 'index',
-      formats: ['es']
+      formats: ['amd']
     },
     rollupOptions: {
-      external: ['vue', '@ownclouders/web-pkg', '@ownclouders/web-client'],
+      external: ['vue', '@ownclouders/web-pkg', '@ownclouders/web-client', 'vue3-gettext'],
       output: {
+        // Remove named AMD id to create anonymous module like official extensions
         globals: {
-          vue: 'Vue'
+          'vue': 'Vue',
+          '@ownclouders/web-pkg': '@ownclouders/web-pkg',
+          '@ownclouders/web-client': '@ownclouders/web-client',
+          'vue3-gettext': 'vue3-gettext'
         }
       }
     },
