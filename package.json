@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourname/ocis-photo-addon.git"
+    "url": "https://github.com/paul43210/ocis-photo-addon.git"
   },
   "type": "module",
   "packageManager": "pnpm@9.1.0",

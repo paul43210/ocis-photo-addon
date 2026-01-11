@@ -26,7 +26,7 @@ A web extension for ownCloud Infinite Scale (oCIS) that provides an enhanced pho
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourname/ocis-photo-addon.git
+git clone https://github.com/paul43210/ocis-photo-addon.git
 cd ocis-photo-addon
 
 # Install dependencies
