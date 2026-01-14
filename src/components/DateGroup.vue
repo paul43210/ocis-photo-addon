@@ -7,8 +7,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { Resource } from '@ownclouders/web-client'
 import PhotoGrid from './PhotoGrid.vue'
-import type { Resource } from '../types'
 
 const props = defineProps<{
   date: string
@@ -23,11 +23,11 @@ const emit = defineEmits<{
 const formattedDate = computed(() => {
   const [year, month, day] = props.date.split('-').map(Number)
   const dateObj = new Date(year, month - 1, day)
-  
+
   const today = new Date()
   const yesterday = new Date(today)
   yesterday.setDate(yesterday.getDate() - 1)
-  
+
   // Check if it's today or yesterday
   if (dateObj.toDateString() === today.toDateString()) {
     return 'Today'
@@ -35,7 +35,7 @@ const formattedDate = computed(() => {
   if (dateObj.toDateString() === yesterday.toDateString()) {
     return 'Yesterday'
   }
-  
+
   // Otherwise format as full date
   return dateObj.toLocaleDateString(undefined, {
     weekday: 'long',

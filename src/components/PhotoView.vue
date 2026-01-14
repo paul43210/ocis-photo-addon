@@ -1,16 +1,12 @@
 <template>
   <div class="photo-view">
-    <div v-if="loading" class="photo-view-loading">
-      Loading photos...
-    </div>
-    
-    <div v-else-if="groupedPhotos.size === 0" class="photo-view-empty">
+    <div v-if="groupedPhotos.size === 0" class="photo-view-empty">
       <div class="empty-message">
         <span class="icon">📷</span>
         <p>No photos found in this folder</p>
       </div>
     </div>
-    
+
     <div v-else class="photo-groups">
       <DateGroup
         v-for="[date, photos] in groupedPhotos"
@@ -20,50 +16,50 @@
         @photo-click="handlePhotoClick"
       />
     </div>
+
+    <!-- Photo lightbox -->
+    <PhotoLightbox
+      :photo="selectedPhoto"
+      @close="closeLightbox"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, watch, ref } from 'vue'
+import { computed, ref } from 'vue'
+import { Resource } from '@ownclouders/web-client'
 import DateGroup from './DateGroup.vue'
+import PhotoLightbox from './PhotoLightbox.vue'
 import { usePhotos } from '../composables/usePhotos'
-import type { Resource } from '../types'
 
-// Props from oCIS folder view system
+// Props - oCIS folder views receive resources as a prop
 const props = defineProps<{
-  space?: unknown
-  items?: Resource[]
+  resources: Resource[]
 }>()
-
-// Emit events back to oCIS
-const emit = defineEmits<{
-  (e: 'fileClick', resource: Resource): void
-}>()
-
-const loading = ref(false)
 
 // Use our photo composable for filtering and grouping
 const { filterImages, groupByDate } = usePhotos()
 
-// Computed: filter and group photos
+// Computed: filter and group photos from props
 const groupedPhotos = computed(() => {
-  if (!props.items || props.items.length === 0) {
+  if (!props.resources || props.resources.length === 0) {
     return new Map<string, Resource[]>()
   }
-  
-  const images = filterImages(props.items)
+
+  const images = filterImages(props.resources)
   return groupByDate(images)
 })
 
-// Handle photo click - pass back to oCIS to open preview
+// Lightbox state
+const selectedPhoto = ref<Resource | null>(null)
+
 function handlePhotoClick(photo: Resource) {
-  emit('fileClick', photo)
+  selectedPhoto.value = photo
 }
 
-// Watch for changes in items
-watch(() => props.items, () => {
-  loading.value = false
-}, { immediate: true })
+function closeLightbox() {
+  selectedPhoto.value = null
+}
 </script>
 
 <style scoped>

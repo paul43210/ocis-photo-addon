@@ -8,26 +8,26 @@
       @keydown.enter="handleClick(photo)"
       tabindex="0"
       role="button"
-      :aria-label="photo.name"
+      :aria-label="photo.name || 'Photo'"
     >
       <img
         :src="getThumbnailUrl(photo)"
-        :alt="photo.name"
+        :alt="photo.name || 'Photo'"
         class="photo-thumbnail"
         loading="lazy"
         @error="handleImageError"
       />
       <div class="photo-overlay">
-        <span class="photo-name">{{ photo.name }}</span>
+        <span class="photo-name">{{ photo.name || 'Untitled' }}</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import type { Resource } from '../types'
+import type { Resource } from '@ownclouders/web-client'
 
-const props = defineProps<{
+defineProps<{
   photos: Resource[]
 }>()
 
@@ -37,15 +37,18 @@ const emit = defineEmits<{
 
 /**
  * Get thumbnail URL for a photo
- * oCIS provides thumbnails via the WebDAV API
+ * oCIS provides thumbnails via the thumbnail property or downloadURL
  */
 function getThumbnailUrl(photo: Resource): string {
-  // TODO: Use oCIS thumbnail API
-  // For now, return the file path which might work for small images
-  // Real implementation should use: /remote.php/dav/spaces/{spaceId}/{path}?preview=1&x=256&y=256
+  // Use thumbnail if available
+  if (photo.thumbnail) {
+    return photo.thumbnail
+  }
+  // Fall back to download URL
   if (photo.downloadURL) {
     return photo.downloadURL
   }
+  // Last resort: webDavPath
   return photo.webDavPath || ''
 }
 

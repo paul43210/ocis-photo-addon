@@ -1,41 +1,61 @@
 /**
  * oCIS Photo Add-on
- * 
- * Adds a PhotoView to the oCIS web interface that displays
- * photos grouped by date with non-image files filtered out.
+ *
+ * A standalone Photos app that displays photos grouped by date.
+ * Accessible from the app switcher menu.
  */
 
-import { defineWebApplication } from '@ownclouders/web-pkg'
-import PhotoView from './components/PhotoView.vue'
+import {
+  defineWebApplication,
+  AppMenuItemExtension
+} from '@ownclouders/web-pkg'
+import { RouteRecordRaw } from 'vue-router'
+import { computed } from 'vue'
+import PhotosView from './views/PhotosView.vue'
+
+const appId = 'photo-addon'
 
 export default defineWebApplication({
   setup() {
-    return {
-      appInfo: {
-        name: 'Photo View',
-        id: 'photo-addon',
-        icon: 'image',
-        color: '#339900'
+    const appInfo = {
+      id: appId,
+      name: 'Photos',
+      icon: 'image',
+      color: '#339900'
+    }
+
+    const routes: RouteRecordRaw[] = [
+      {
+        path: '/',
+        redirect: { name: `${appId}-all` }
       },
-      
-      // Register as a folder view extension
-      extensions: [
-        {
-          id: 'com.github.ocis-photo-addon.folder-view',
-          type: 'folderView',
-          scopes: ['resource', 'space', 'favorite', 'share'],
-          folderView: {
-            name: 'photo-view',
-            label: 'Photo View',
-            icon: {
-              name: 'image',
-              fillType: 'line'
-            },
-            component: PhotoView,
-            componentAttrs: {}
-          }
+      {
+        path: '/all',
+        name: `${appId}-all`,
+        component: PhotosView,
+        meta: {
+          authContext: 'user',
+          title: 'All Photos'
         }
-      ]
+      }
+    ]
+
+    const menuItems = computed<AppMenuItemExtension[]>(() => [
+      {
+        id: `app.${appId}.menuItem`,
+        type: 'appMenuItem',
+        label: () => appInfo.name,
+        color: appInfo.color,
+        icon: appInfo.icon,
+        priority: 30,
+        path: `/${appId}`
+      }
+    ])
+
+    return {
+      appInfo,
+      routes,
+      extensions: menuItems
     }
   }
 })

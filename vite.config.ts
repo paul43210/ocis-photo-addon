@@ -11,6 +11,7 @@ export default defineConfig({
       fileName: 'index',
       formats: ['amd']
     },
+    cssCodeSplit: false,
     rollupOptions: {
       external: ['vue', '@ownclouders/web-pkg', '@ownclouders/web-client', 'vue3-gettext'],
       output: {
@@ -20,6 +21,11 @@ export default defineConfig({
           '@ownclouders/web-pkg': '@ownclouders/web-pkg',
           '@ownclouders/web-client': '@ownclouders/web-client',
           'vue3-gettext': 'vue3-gettext'
+        },
+        // Inline CSS into JS bundle
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name === 'style.css') return 'style.css'
+          return assetInfo.name || 'asset'
         }
       }
     },
