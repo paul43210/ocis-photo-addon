@@ -223,20 +223,37 @@ async function loadImage(photo: PhotoWithDate) {
   imageBlobUrl.value = ''
 
   const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
-  const fileName = photo.name || ''
 
-  // Get spaceId from photo or parent reference
-  const spaceId = (photo as any).parentReference?.driveId ||
-                  (photo as any).storageId ||
-                  photo.id?.split('!')[0] || ''
-
-  if (!fileName || !spaceId) {
+  // Get the full path (includes folder structure) - use our custom filePath property
+  const filePath = (photo as any).filePath || (photo as any).path || photo.name || ''
+  if (!filePath) {
+    console.error('[Lightbox] No file path available')
     imageLoading.value = false
     return
   }
 
+  // Get spaceId from photo ID (format: storageId$spaceId!nodeId)
+  // Or from parentReference.driveId
+  let spaceId = (photo as any).parentReference?.driveId || ''
+  if (!spaceId && photo.id) {
+    // Extract driveId from item id: storageId$spaceId!nodeId → storageId$spaceId
+    const idParts = photo.id.split('!')
+    if (idParts.length > 0) {
+      spaceId = idParts[0]
+    }
+  }
+
+  if (!spaceId) {
+    console.error('[Lightbox] No spaceId available')
+    imageLoading.value = false
+    return
+  }
+
+  // Encode each path segment separately to handle spaces in folder/file names
+  const encodedPath = filePath.split('/').map((segment: string) => encodeURIComponent(segment)).join('/')
+
   // Construct the WebDAV URL for full image (no preview params for full quality)
-  const url = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}/${encodeURIComponent(fileName)}`
+  const url = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
 
   try {
     const response = await clientService.httpAuthenticated.get(url, {
@@ -245,9 +262,8 @@ async function loadImage(photo: PhotoWithDate) {
 
     const blob = response.data as Blob
     imageBlobUrl.value = URL.createObjectURL(blob)
-    console.log(`[Lightbox] Loaded: ${fileName}`)
   } catch (err) {
-    console.error(`[Lightbox] Failed to load ${fileName}:`, err)
+    console.error(`[Lightbox] Failed to load ${filePath}:`, err)
     imageBlobUrl.value = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="10">Error</text></svg>'
   } finally {
     imageLoading.value = false

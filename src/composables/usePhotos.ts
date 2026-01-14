@@ -73,20 +73,32 @@ export function usePhotos() {
   /**
    * Filter a list of resources to only include images
    * Now uses built-in oCIS photo metadata (photo.takenDateTime) instead of custom tags
+   * DEBUG: Limited to 10 photos for testing
    */
   function filterImages(files: Resource[]): Resource[] {
     // Reset debug counter for each filter call
     filterDebugCount = 0
 
-    const filtered = files.filter(file => {
+    const filtered: Resource[] = []
+
+    for (const file of files) {
+      // DEBUG LIMIT: Stop at 10 photos
+      if (filtered.length >= 10) {
+        break
+      }
+
       // Exclude directories
       if (file.isFolder || file.type === 'folder') {
-        return false
+        continue
       }
+
       const img = isImage(file)
+      if (!img) continue
+
+      filtered.push(file)
 
       // Debug: log first few resources to see structure
-      if (img && filterDebugCount < 5) {
+      if (filterDebugCount < 5) {
         filterDebugCount++
         const f = file as any
         console.log(`[usePhotos] Resource ${filterDebugCount}:`, file.name)
@@ -104,10 +116,9 @@ export function usePhotos() {
           console.log(`  - EXIF-related props:`, exifProps.map(k => `${k}=${f[k]}`))
         }
       }
+    }
 
-      return img
-    })
-    console.log(`filterImages: ${files.length} files -> ${filtered.length} photos`)
+    console.log(`filterImages: ${files.length} files -> ${filtered.length} photos (DEBUG LIMIT: 10)`)
     return filtered
   }
 

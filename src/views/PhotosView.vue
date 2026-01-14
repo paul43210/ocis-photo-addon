@@ -29,6 +29,11 @@
               {{ mode.label }}
             </button>
           </div>
+          <!-- EXIF only toggle -->
+          <label class="exif-toggle">
+            <input type="checkbox" v-model="exifOnly" />
+            <span class="toggle-label">EXIF only</span>
+          </label>
         </div>
       </div>
       <p v-if="loading" class="loading-status">
@@ -162,6 +167,7 @@ interface PhotoWithDate extends Resource {
   timestamp?: number // Unix timestamp for sorting/grouping
   dateSource?: string // Track where the date came from (for debugging)
   graphPhoto?: GraphPhoto & { location?: GeoCoordinates } // Original Graph API photo metadata + location
+  filePath?: string  // Full file path (our custom property, since Resource.path may be read-only)
 }
 
 // A sub-group (stack) of photos taken close together
@@ -184,7 +190,33 @@ const groupModes = [
   { value: 'month' as GroupMode, label: 'Month' },
   { value: 'year' as GroupMode, label: 'Year' }
 ]
-const groupMode = ref<GroupMode>('day')
+
+// LocalStorage keys for persistent settings
+const STORAGE_KEY_GROUP_MODE = 'photo-addon:groupMode'
+const STORAGE_KEY_EXIF_ONLY = 'photo-addon:exifOnly'
+
+// Load initial values from localStorage
+function getStoredGroupMode(): GroupMode {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_GROUP_MODE)
+    if (saved && ['day', 'week', 'month', 'year'].includes(saved)) {
+      return saved as GroupMode
+    }
+  } catch (e) { /* ignore */ }
+  return 'day'
+}
+
+function getStoredExifOnly(): boolean {
+  try {
+    return localStorage.getItem(STORAGE_KEY_EXIF_ONLY) === 'true'
+  } catch (e) { /* ignore */ }
+  return false
+}
+
+const groupMode = ref<GroupMode>(getStoredGroupMode())
+
+// EXIF-only filter toggle
+const exifOnly = ref(getStoredExifOnly())
 
 // Refs
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -235,8 +267,9 @@ let personalSpace: SpaceResource | null = null
 
 // Constants
 const SCROLL_THRESHOLD = 500 // pixels from bottom to trigger load more
-const INITIAL_DAYS = 7 // Search back 7 days on initial load
-const DAYS_PER_BATCH = 14 // Load 14 days at a time when scrolling
+const MIN_PHOTOS_ON_SCREEN = 20 // Minimum photos to show before stopping initial load
+const DAYS_PER_BATCH = 7 // Load 7 days at a time when scrolling
+const MAX_DAYS_BACK = 365 * 10 // Maximum 10 years back to prevent infinite loading
 
 // Supported image extensions (actual photo formats only)
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'tiff', 'tif'])
@@ -270,14 +303,25 @@ function isImageFile(resource: Resource): boolean {
   return IMAGE_EXTENSIONS.has(ext)
 }
 
-const photoCount = computed(() => allPhotos.value.length)
+// Filter photos based on EXIF toggle
+const displayedPhotos = computed(() => {
+  if (!exifOnly.value) {
+    return allPhotos.value
+  }
+  // Filter to only photos with real EXIF data (not mdate/lastModifiedDateTime fallback)
+  return allPhotos.value.filter(photo => {
+    return photo.dateSource === 'photo.takenDateTime'
+  })
+})
+
+const photoCount = computed(() => displayedPhotos.value.length)
 
 // Group photos by date
 const groupedPhotos = computed(() => {
   const mode = groupMode.value
   const groups = new Map<string, PhotoWithDate[]>()
 
-  for (const photo of allPhotos.value) {
+  for (const photo of displayedPhotos.value) {
     const dateKey = getGroupKey(photo.exifDate || '', mode)
     if (!dateKey) continue
 
@@ -474,7 +518,6 @@ function changeGroupMode(newMode: GroupMode) {
 
 // Handle date filter change - reload photos starting from selected month
 function onDateFilterChange() {
-  console.log(`Date filter changed to: ${filterYear.value}-${filterMonth.value + 1}`)
   loadPhotosFromFilter()
 }
 
@@ -486,44 +529,52 @@ function jumpToToday() {
   loadPhotosFromFilter()
 }
 
-// Load photos for the selected month (filters from cache)
+// Load photos for the selected month - resets view and loads from selected date
 async function loadPhotosFromFilter() {
-  // If cache is empty, do a full load first
-  if (allPhotosCache.length === 0) {
+  // Reset state
+  allPhotos.value = []
+  loadedDates.value.clear()
+  isFullyLoaded.value = false
+
+  // If cache is empty, do a full load (which will use the filter)
+  if (!allPhotosCacheLoaded) {
     await loadPhotos()
     return
   }
 
-  // Calculate date range for the selected month
-  const year = filterYear.value
-  const month = filterMonth.value
+  loading.value = true
+  currentDateRange.value = `${monthNames[filterMonth.value]} ${filterYear.value}`
 
-  // End of selected month (or today if current month)
-  const now = new Date()
-  let endDate: Date
-  if (year === now.getFullYear() && month === now.getMonth()) {
-    endDate = now
-  } else {
-    // Last day of selected month
-    endDate = new Date(year, month + 1, 0)
+  try {
+    // Determine starting date based on filter
+    let endDate: Date
+    const now = new Date()
+    if (filterYear.value === now.getFullYear() && filterMonth.value === now.getMonth()) {
+      // Current month selected - start from today
+      endDate = now
+    } else {
+      // Specific month selected - start from end of that month
+      endDate = new Date(filterYear.value, filterMonth.value + 1, 0)
+      if (endDate > now) endDate = now
+    }
+
+    // Reset the oldest loaded date to start loading from filter date
+    oldestLoadedDate.value = new Date(endDate)
+    oldestLoadedDate.value.setDate(oldestLoadedDate.value.getDate() + 1)
+
+    // Load initial batch
+    await loadMorePhotos()
+
+    // Keep loading until screen is filled
+    let loopGuard = 0
+    while (needsMorePhotos() && !isFullyLoaded.value && loopGuard < 50) {
+      loopGuard++
+      await loadMorePhotos()
+    }
+
+  } finally {
+    loading.value = false
   }
-
-  // Start from beginning of month
-  const startDate = new Date(year, month, 1)
-  const startStr = formatDate(startDate)
-  const endStr = formatDate(endDate)
-
-  currentDateRange.value = `${monthNames[month]} ${year}`
-  console.log(`[Filter] Filtering photos for: ${startStr} to ${endStr}`)
-
-  // Filter from cache (instant, no API call)
-  const filtered = allPhotosCache.filter(photo => {
-    if (!photo.exifDate) return false
-    return photo.exifDate >= startStr && photo.exifDate <= endStr
-  }).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-
-  allPhotos.value = filtered
-  console.log(`[Filter] ${filtered.length} photos for ${monthNames[month]} ${year}`)
 }
 
 // Scroll handler
@@ -557,22 +608,12 @@ function formatDate(date: Date): string {
 function extractExifDateTime(resource: Resource): { date: string, time: string, timestamp: number, source: string } | null {
   const r = resource as any
 
-  // DEBUG: Log the full resource structure for the first few photos
-  if (debugPhotoCount < 3) {
-    debugPhotoCount++
-    console.log(`[DEBUG] Photo ${debugPhotoCount} raw resource:`, JSON.stringify(r, null, 2))
-    console.log(`[DEBUG] Photo ${debugPhotoCount} .photo property:`, r.photo)
-    console.log(`[DEBUG] Photo ${debugPhotoCount} .photo?.takenDateTime:`, r.photo?.takenDateTime)
-  }
-
   // PRIMARY: Check for photo-taken-date-time WebDAV property (from our patched oCIS)
-  // This is the oc:photo-taken-date-time property added to search results
   const photoTakenDateTime = r['photo-taken-date-time'] || r['oc:photo-taken-date-time'] ||
     r.photoTakenDateTime || r.extraProps?.['oc:photo-taken-date-time']
   if (photoTakenDateTime) {
     const parsed = parseExifDate(photoTakenDateTime)
     if (parsed) {
-      console.log(`[EXIF] ${r.name}: Using photo-taken-date-time = ${photoTakenDateTime}`)
       return { ...parsed, source: 'photo-taken-date-time' }
     }
   }
@@ -581,7 +622,6 @@ function extractExifDateTime(resource: Resource): { date: string, time: string, 
   if (r.photo?.takenDateTime) {
     const parsed = parseExifDate(r.photo.takenDateTime)
     if (parsed) {
-      console.log(`[EXIF] ${r.name}: Using photo.takenDateTime = ${r.photo.takenDateTime}`)
       return { ...parsed, source: 'photo.takenDateTime' }
     }
   }
@@ -600,7 +640,6 @@ function extractExifDateTime(resource: Resource): { date: string, time: string, 
     if (field.value) {
       const parsed = parseExifDate(field.value)
       if (parsed) {
-        console.log(`[EXIF] ${r.name}: Using legacy field ${field.name} = ${field.value}`)
         return { ...parsed, source: field.name }
       }
     }
@@ -611,7 +650,6 @@ function extractExifDateTime(resource: Resource): { date: string, time: string, 
   if (mdate) {
     const d = new Date(mdate)
     if (!isNaN(d.getTime())) {
-      console.log(`[EXIF] ${r.name}: No EXIF data, falling back to mdate = ${mdate}`)
       return {
         date: formatDate(d),
         time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`,
@@ -621,12 +659,8 @@ function extractExifDateTime(resource: Resource): { date: string, time: string, 
     }
   }
 
-  console.warn(`[EXIF] ${r.name}: No date found at all!`)
   return null
 }
-
-// Debug counter for limiting verbose logging
-let debugPhotoCount = 0
 
 /**
  * Parse EXIF date string in various formats
@@ -672,8 +706,6 @@ async function fetchAllPhotosFromDrive(driveId: string): Promise<PhotoWithDate[]
   const photos: PhotoWithDate[] = []
   const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
 
-  console.log(`[Graph] Fetching photos from drive: ${driveId}`)
-
   // For root folder, the itemId is: storageId$spaceId!spaceId
   // driveId format is: storageId$spaceId
   const [storageId, spaceId] = driveId.split('$')
@@ -684,40 +716,9 @@ async function fetchAllPhotosFromDrive(driveId: string): Promise<PhotoWithDate[]
     try {
       // oCIS Graph API: /drives/{driveId}/items/{itemId}/children
       const url = `${serverUrl}/graph/v1.0/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(folderId)}/children`
-      console.log(`[Graph] Fetching: ${url}`)
 
       const response = await clientService.httpAuthenticated.get<GraphResponse>(url)
       const items = response.data.value || []
-
-      console.log(`[Graph] Got ${items.length} items from ${folderPath || 'root'}`)
-
-      // Debug: log first item structure to see all available fields
-      if (items.length > 0) {
-        console.log('[Graph] First item full structure:', JSON.stringify(items[0], null, 2))
-      }
-
-      // Debug: log first item with photo
-      const firstPhotoItem = items.find(item => item.photo)
-      if (firstPhotoItem) {
-        console.log('[Graph] First item with photo metadata:', {
-          name: firstPhotoItem.name,
-          photo: firstPhotoItem.photo,
-          location: firstPhotoItem.location,
-          webDavUrl: firstPhotoItem.webDavUrl,
-          parentReference: firstPhotoItem.parentReference
-        })
-      }
-
-      // Debug: check for any item with location data
-      const itemWithLocation = items.find(item => item.location)
-      if (itemWithLocation) {
-        console.log('[Graph] Item with location data:', {
-          name: itemWithLocation.name,
-          location: itemWithLocation.location
-        })
-      } else {
-        console.log('[Graph] No items have location data in this folder')
-      }
 
       for (const item of items) {
         // If it's a folder, recurse into it
@@ -751,7 +752,6 @@ async function fetchAllPhotosFromDrive(driveId: string): Promise<PhotoWithDate[]
           exifTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
           timestamp = d.getTime()
           dateSource = 'photo.takenDateTime'
-          console.log(`[Graph] ${item.name}: EXIF date = ${item.photo.takenDateTime}`)
         } else if (item.lastModifiedDateTime) {
           // Fallback to modification date
           const d = new Date(item.lastModifiedDateTime)
@@ -765,13 +765,12 @@ async function fetchAllPhotosFromDrive(driveId: string): Promise<PhotoWithDate[]
         }
 
         // Create a Resource-compatible object
-        // Use webDavUrl from Graph API for correct file access
         const photoResource: PhotoWithDate = {
           id: item.id,
           fileId: item.id,
           name: item.name,
-          path: `${folderPath}/${item.name}`,
-          webDavPath: item.webDavUrl || '',  // Full WebDAV URL from Graph API
+          filePath: `${folderPath}/${item.name}`,  // Our custom property for full path
+          webDavPath: item.webDavUrl || '',
           mimeType: mimeType,
           size: item.size || 0,
           exifDate,
@@ -784,92 +783,115 @@ async function fetchAllPhotosFromDrive(driveId: string): Promise<PhotoWithDate[]
         photos.push(photoResource)
       }
 
-      // Handle pagination if there are more results
-      // Note: oCIS Graph API uses @odata.nextLink for pagination
-      // For now, we'll rely on the default page size being sufficient
-
     } catch (err) {
       console.error(`[Graph] Error fetching folder ${folderPath}:`, err)
     }
   }
 
   await fetchFolderContents()
-
-  console.log(`[Graph] Total photos found: ${photos.length}`)
   return photos
-}
-
-/**
- * Search for photos by date range using Graph API
- * Fetches all photos then filters by date client-side
- */
-async function searchPhotosByDateRange(startDate: string, endDate: string): Promise<PhotoWithDate[]> {
-  if (!personalSpace) {
-    console.error('[Graph] No personal space available')
-    return []
-  }
-
-  console.log(`[Graph] Searching for photos from ${startDate} to ${endDate}`)
-
-  // Check if we've already loaded all photos
-  if (allPhotosCache.length === 0) {
-    console.log('[Graph] Cache empty, fetching all photos...')
-    allPhotosCache = await fetchAllPhotosFromDrive(personalSpace.id)
-  }
-
-  // Filter by date range
-  const filtered = allPhotosCache.filter(photo => {
-    if (!photo.exifDate) return false
-    return photo.exifDate >= startDate && photo.exifDate <= endDate
-  })
-
-  console.log(`[Graph] ${filtered.length} photos in date range ${startDate} to ${endDate}`)
-  return filtered
 }
 
 // Cache for all photos (avoid refetching on every date filter change)
 let allPhotosCache: PhotoWithDate[] = []
+let allPhotosCacheLoaded = false
 
 /**
- * Search for photos by single date (wrapper for date range)
+ * Ensure the photo cache is populated
  */
-async function searchPhotosByDate(dateStr: string): Promise<PhotoWithDate[]> {
-  return searchPhotosByDateRange(dateStr, dateStr)
+async function ensurePhotoCache(): Promise<void> {
+  if (allPhotosCacheLoaded) return
+
+  if (!personalSpace) {
+    const spaces = spacesStore.spaces
+    personalSpace = spaces.find((s: SpaceResource) => s.driveType === 'personal') || null
+  }
+
+  if (!personalSpace) {
+    throw new Error('Could not find personal space')
+  }
+
+  allPhotosCache = await fetchAllPhotosFromDrive(personalSpace.id)
+  // Sort by date (newest first)
+  allPhotosCache.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+  allPhotosCacheLoaded = true
 }
 
-// Initial load - fetch all photos using Graph API
+/**
+ * Get photos for a specific date range from cache
+ */
+function getPhotosInRange(startDate: string, endDate: string): PhotoWithDate[] {
+  return allPhotosCache.filter(photo => {
+    if (!photo.exifDate) return false
+    return photo.exifDate >= startDate && photo.exifDate <= endDate
+  })
+}
+
+/**
+ * Get the earliest date in the photo cache
+ */
+function getEarliestPhotoDate(): string | null {
+  if (allPhotosCache.length === 0) return null
+  // Cache is sorted newest first, so last item is earliest
+  return allPhotosCache[allPhotosCache.length - 1].exifDate || null
+}
+
+/**
+ * Check if screen needs more photos (not enough to fill visible area + buffer)
+ */
+function needsMorePhotos(): boolean {
+  if (!scrollContainer.value) return allPhotos.value.length < MIN_PHOTOS_ON_SCREEN
+
+  const { scrollHeight, clientHeight } = scrollContainer.value
+  // Need more if content doesn't fill screen + scroll threshold
+  return scrollHeight < clientHeight + SCROLL_THRESHOLD && !isFullyLoaded.value
+}
+
+// Initial load - start from today (or selected filter date) and load until screen is full
 async function loadPhotos() {
   loading.value = true
   error.value = null
   allPhotos.value = []
   loadedPhotoIds.value.clear()
-  allPhotosCache = [] // Clear cache for fresh load
+  loadedDates.value.clear()
   isFullyLoaded.value = false
 
   try {
-    // Get personal space for thumbnail URLs
-    const spaces = spacesStore.spaces
-    personalSpace = spaces.find((s: SpaceResource) => s.driveType === 'personal') || null
+    // Ensure cache is populated
+    await ensurePhotoCache()
 
-    if (!personalSpace) {
-      error.value = 'Could not find personal space'
+    if (allPhotosCache.length === 0) {
+      isFullyLoaded.value = true
       return
     }
 
-    currentDateRange.value = 'all photos'
-    console.log('[Graph] Initial load: fetching all photos')
+    // Determine starting date based on filter
+    let endDate: Date
+    if (filterYear.value === new Date().getFullYear() && filterMonth.value === new Date().getMonth()) {
+      // Current month selected - start from today
+      endDate = new Date()
+    } else {
+      // Specific month selected - start from end of that month
+      endDate = new Date(filterYear.value, filterMonth.value + 1, 0) // Last day of selected month
+      const now = new Date()
+      if (endDate > now) endDate = now
+    }
 
-    // Fetch all photos from the drive (will be cached)
-    const photos = await fetchAllPhotosFromDrive(personalSpace.id)
-    allPhotosCache = photos
+    // Start loading from the end date, going backwards
+    oldestLoadedDate.value = new Date(endDate)
+    oldestLoadedDate.value.setDate(oldestLoadedDate.value.getDate() + 1) // Will be decremented on first load
 
-    // Sort by date (newest first) and use all photos
-    allPhotos.value = [...photos].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+    currentDateRange.value = 'today'
 
-    console.log(`[Graph] Initial load complete: ${allPhotos.value.length} photos`)
+    // Load batches until screen is full or we hit the limit
+    await loadMorePhotos()
 
-    // Mark as fully loaded since we fetched everything
-    isFullyLoaded.value = true
+    // Keep loading until screen is filled
+    let loopGuard = 0
+    while (needsMorePhotos() && !isFullyLoaded.value && loopGuard < 50) {
+      loopGuard++
+      await loadMorePhotos()
+    }
 
   } catch (err: any) {
     console.error('Error loading photos:', err)
@@ -879,24 +901,44 @@ async function loadPhotos() {
   }
 }
 
-// Load more photos (older dates) using date range
+// Load more photos (older dates) - called on scroll or initial fill
 async function loadMorePhotos() {
   if (loadingMore.value || isFullyLoaded.value) return
 
   loadingMore.value = true
-  const endDate = new Date(oldestLoadedDate.value)
-  endDate.setDate(endDate.getDate() - 1)  // Start from day before oldest loaded
-
-  const startDate = new Date(endDate)
-  startDate.setDate(startDate.getDate() - DAYS_PER_BATCH)
 
   try {
-    currentDateRange.value = `${formatDate(startDate)} to ${formatDate(endDate)}`
-    console.log(`Loading more: ${formatDate(startDate)} to ${formatDate(endDate)}`)
+    // Calculate date range to load
+    const endDate = new Date(oldestLoadedDate.value)
+    endDate.setDate(endDate.getDate() - 1) // Start from day before oldest loaded
 
-    const photos = await searchPhotosByDateRange(formatDate(startDate), formatDate(endDate))
+    const startDate = new Date(endDate)
+    startDate.setDate(startDate.getDate() - DAYS_PER_BATCH + 1) // Load DAYS_PER_BATCH days
 
-    // Mark all dates in range as loaded
+    const startStr = formatDate(startDate)
+    const endStr = formatDate(endDate)
+
+    currentDateRange.value = `${startStr} to ${endStr}`
+
+    // Check if we've gone too far back
+    const today = new Date()
+    const daysSinceStart = Math.floor((today.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000))
+    if (daysSinceStart > MAX_DAYS_BACK) {
+      isFullyLoaded.value = true
+      return
+    }
+
+    // Check if we've gone past the earliest photo
+    const earliestDate = getEarliestPhotoDate()
+    if (earliestDate && startStr < earliestDate) {
+      isFullyLoaded.value = true
+      // Still load any remaining photos in range
+    }
+
+    // Get photos from cache for this date range
+    const photos = getPhotosInRange(startStr, endStr)
+
+    // Mark dates as loaded
     const tempDate = new Date(startDate)
     while (tempDate <= endDate) {
       loadedDates.value.add(formatDate(tempDate))
@@ -906,18 +948,8 @@ async function loadMorePhotos() {
     oldestLoadedDate.value = new Date(startDate)
 
     if (photos.length > 0) {
+      // Add new photos (they're already sorted in cache)
       allPhotos.value = [...allPhotos.value, ...photos]
-      console.log(`Loaded ${photos.length} more photos`)
-    } else {
-      // No photos found in this range - check if we should stop
-      const today = new Date()
-      const daysSinceStart = Math.floor((today.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000))
-      if (daysSinceStart > 365) {
-        console.log('Gone back over a year, stopping search')
-        isFullyLoaded.value = true
-      } else {
-        console.log('No photos in this batch, will try more on next scroll')
-      }
     }
 
   } finally {
@@ -952,41 +984,36 @@ async function fetchAndCacheImage(photo: PhotoWithDate, cacheKey: string) {
   if (!personalSpace) return
 
   const spaceId = personalSpace.id
-  const fileName = photo.name || ''
-  if (!fileName) return
+  // Use our custom filePath property (full path including folders)
+  const photoPath = photo.filePath || photo.name || ''
+  if (!photoPath) return
 
-  // Construct the WebDAV URL for preview
-  const url = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}/${encodeURIComponent(fileName)}?preview=1&x=256&y=256&a=1`
+  // Construct the WebDAV URL for preview using full path
+  // Need to encode each path segment separately to handle spaces in folder names
+  const encodedPath = photoPath.split('/').map(segment => encodeURIComponent(segment)).join('/')
+  const url = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}?preview=1&x=256&y=256&a=1`
 
   try {
-    // Fetch with authentication
     const response = await clientService.httpAuthenticated.get(url, {
       responseType: 'blob'
     } as any)
 
-    // Create blob URL
     const blob = response.data as Blob
     const blobUrl = URL.createObjectURL(blob)
     blobUrlCache.set(cacheKey, blobUrl)
 
-    // Trigger reactivity by updating the photos array
-    // Find and update the photo in allPhotos
+    // Trigger reactivity update
     const index = allPhotos.value.findIndex(p => (p.id || p.fileId || p.name) === cacheKey)
     if (index >= 0) {
-      // Force reactivity update
       allPhotos.value = [...allPhotos.value]
     }
-
-    console.log(`[Image] Loaded: ${fileName}`)
   } catch (err) {
-    console.error(`[Image] Failed to load ${fileName}:`, err)
-    // Cache a placeholder for failed images
+    // Silently cache error placeholder
     blobUrlCache.set(cacheKey, 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="10">Error</text></svg>')
   }
 }
 
 function openPhoto(photo: PhotoWithDate, groupPhotos?: PhotoWithDate[]) {
-  console.log('Open photo:', photo.name, groupPhotos ? `(group of ${groupPhotos.length})` : '(single)')
   selectedPhoto.value = photo
 
   // Set up group navigation context
@@ -1143,6 +1170,31 @@ function injectStyles() {
     .today-btn:hover {
       background: var(--oc-color-swatch-primary-default, #0070c0);
       color: white;
+    }
+    /* EXIF only toggle */
+    .exif-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: var(--oc-color-background-muted, #f0f0f0);
+      transition: background 0.15s ease;
+    }
+    .exif-toggle:hover {
+      background: var(--oc-color-background-highlight, #e5e5e5);
+    }
+    .exif-toggle input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+      accent-color: var(--oc-color-swatch-primary-default, #0070c0);
+    }
+    .exif-toggle .toggle-label {
+      font-size: 0.875rem;
+      color: var(--oc-color-text-default, #333);
+      white-space: nowrap;
     }
     .photo-count, .loading-status {
       color: var(--oc-color-text-muted, #666);
@@ -1534,6 +1586,23 @@ function injectStyles() {
   `
   document.head.appendChild(style)
 }
+
+// Save settings to localStorage on change
+watch(groupMode, (newVal) => {
+  try {
+    localStorage.setItem(STORAGE_KEY_GROUP_MODE, newVal)
+  } catch (e) {
+    // ignore
+  }
+})
+
+watch(exifOnly, (newVal) => {
+  try {
+    localStorage.setItem(STORAGE_KEY_EXIF_ONLY, String(newVal))
+  } catch (e) {
+    // ignore
+  }
+})
 
 onMounted(() => {
   injectStyles()

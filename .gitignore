@@ -32,3 +32,4 @@ coverage/
 
 # Vite
 vite.config.ts.timestamp-*
+CLAUDE.md
