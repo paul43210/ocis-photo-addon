@@ -31,7 +31,7 @@
 - **Prompt:** `prompt-date-filtered-search.md`
 
 ### 🔴 BUG: EXIF Toggle No Longer Functions
-- [ ] **Update search query to respect EXIF toggle state**
+- [x] **Update search query to respect EXIF toggle state**
 - After switching from folder crawling to Search API, the "EXIF only" toggle no longer filters results
 - **When EXIF toggle ON:** Query should filter by `photo.takenDateTime` (only photos with EXIF capture date)
 - **When EXIF toggle OFF:** Query should use file `mtime` (modification time) to include all images
@@ -65,6 +65,8 @@
 - [🔴] Display the path to the photo in lightbox/details
 - [🟡] Add "Open in Files" link to navigate to file location in standard oCIS view
 - [🔴] Breadcrumb navigation in photo view
+- **Prompt (lightbox path):** `prompt-lightbox-path.md`
+- **Prompt (breadcrumb):** `prompt-breadcrumb-nav.md`
 
 ---
 
@@ -85,12 +87,14 @@
 ## Phase 3: Photo Actions & Context Menu
 
 ### 🔴 Context Menu ("⋮" Three Dots)
-- [🟢] Rename photo
-- [ ] Move to folder
-- [ ] Copy to folder
-- [ ] Share (generate link)
-- [ ] Delete (with confirmation)
 - [ ] Download original
+- [ ] Open in Files
+- [ ] Copy link to clipboard
+- [ ] Delete (with confirmation)
+- [🟢] Rename photo (future)
+- [🟢] Move to folder (future)
+- [🟢] Copy to folder (future)
+- **Prompt:** `prompt-context-menu.md`
 
 ### 🟡 Share Button
 - [🟢] Quick share button in lightbox view
@@ -210,6 +214,7 @@
 - [x] Backend: WebDAV oc:photo-* properties
 - [x] Frontend: WebDAV Search API integration
 - [x] Frontend: Date-filtered search queries
+- [x] Frontend: EXIF toggle respects search query mode
 - [x] Stack view: Arrow positioning fixed
 - [x] Stack view: Swipe gesture navigation
 - [x] Stack view: Touch responsiveness improvements

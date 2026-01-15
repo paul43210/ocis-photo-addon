@@ -825,15 +825,19 @@ function getSearchDateRange(endDate: Date, monthsBack: number = 3): { start: str
 /**
  * Fetch photos using WebDAV REPORT with KQL date filter
  * Uses server-side filtering to dramatically reduce response size
+ * @param exifOnly - When true, filter by photo.takenDateTime (EXIF date). When false, filter by mtime (file modification date)
  */
-async function fetchPhotosViaSearch(driveId: string, dateRange: { start: string, end: string }): Promise<PhotoWithDate[]> {
+async function fetchPhotosViaSearch(driveId: string, dateRange: { start: string, end: string }, useExifDate: boolean = true): Promise<PhotoWithDate[]> {
   const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
   const spaceId = driveId
 
   // KQL pattern with date filter AND image type filter
-  // Uses correct field names: mediatype (not mimeType), photo.takenDateTime with >= and <= operators
+  // Uses correct field names: mediatype (not mimeType)
   // Note: > and < must be XML-escaped in the pattern
-  const pattern = `mediatype:image* AND photo.takenDateTime&gt;=${dateRange.start} AND photo.takenDateTime&lt;=${dateRange.end}`
+  // When useExifDate is true: filter by photo.takenDateTime (EXIF capture date)
+  // When useExifDate is false: filter by mtime (file modification date)
+  const dateField = useExifDate ? 'photo.takenDateTime' : 'mtime'
+  const pattern = `mediatype:image* AND ${dateField}&gt;=${dateRange.start} AND ${dateField}&lt;=${dateRange.end}`
 
   const searchBody = `<?xml version="1.0" encoding="UTF-8"?>
 <oc:search-files xmlns:oc="http://owncloud.org/ns" xmlns:d="DAV:">
@@ -1088,7 +1092,8 @@ async function loadMorePhotos() {
     }
 
     // Fetch photos from server with date filter
-    const photos = await fetchPhotosViaSearch(personalSpace.id, dateRange)
+    // Pass exifOnly.value to determine which date field to filter by
+    const photos = await fetchPhotosViaSearch(personalSpace.id, dateRange, exifOnly.value)
 
     // Track this range as loaded
     loadedRanges.value.push(dateRange)
@@ -1791,6 +1796,8 @@ watch(exifOnly, (newVal) => {
   } catch (e) {
     // ignore
   }
+  // Reload photos with new filter when toggle changes
+  loadPhotos()
 })
 
 onMounted(() => {
