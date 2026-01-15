@@ -1,6 +1,6 @@
 # oCIS Photo Add-on - Backlog
 
-**Last Updated:** January 14, 2026
+**Last Updated:** January 15, 2026
 
 ---
 
@@ -37,6 +37,7 @@
 - **When EXIF toggle OFF:** Query should use file `mtime` (modification time) to include all images
 - Currently search always uses `photo.takenDateTime`, ignoring toggle state
 - **Impact:** Users cannot view photos without EXIF data
+- **Prompt:** `prompt-fix-exif-toggle.md`
 
 ---
 
