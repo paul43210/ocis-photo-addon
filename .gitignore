@@ -33,3 +33,7 @@ coverage/
 # Vite
 vite.config.ts.timestamp-*
 CLAUDE.md
+
+# Claude
+.claude/
+scripts/

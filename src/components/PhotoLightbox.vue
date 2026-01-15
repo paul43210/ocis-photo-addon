@@ -6,40 +6,53 @@
         &times;
       </button>
 
-      <!-- Navigation: Previous -->
-      <button
-        v-if="canNavigatePrev"
-        class="lightbox-nav lightbox-nav-prev"
-        @click.stop="navigate('prev')"
-        aria-label="Previous photo"
-      >
-        <span class="nav-arrow">&lt;</span>
-      </button>
-
-      <!-- Navigation: Next -->
-      <button
-        v-if="canNavigateNext"
-        class="lightbox-nav lightbox-nav-next"
-        @click.stop="navigate('next')"
-        aria-label="Next photo"
-      >
-        <span class="nav-arrow">&gt;</span>
-      </button>
-
       <!-- Photo counter -->
       <div v-if="groupPhotos.length > 1" class="lightbox-counter">
         {{ currentIndex + 1 }} / {{ groupPhotos.length }}
       </div>
 
-      <!-- Main image -->
-      <div class="lightbox-image-container">
-        <div v-if="imageLoading" class="lightbox-loading">Loading...</div>
-        <img
-          v-else
-          :src="imageBlobUrl"
-          :alt="photo.name || 'Photo'"
-          class="lightbox-image"
-        />
+      <!-- Main image with navigation inside - fixed size frame -->
+      <div
+        class="lightbox-image-container"
+        :style="{ width: frameWidth + 'px', height: frameHeight + 'px' }"
+        @touchstart="handleTouchStart"
+        @touchmove="handleTouchMove"
+        @touchend="handleTouchEnd"
+      >
+        <!-- Navigation: Previous (inside image container) -->
+        <button
+          v-if="canNavigatePrev"
+          class="lightbox-nav lightbox-nav-prev"
+          @click.stop="navigate('prev')"
+          aria-label="Previous photo"
+        >
+          <span class="nav-arrow">&#8249;</span>
+        </button>
+
+        <!-- Show loading only if no thumbnail available -->
+        <div v-if="imageLoading && !imageBlobUrl" class="lightbox-loading">Loading...</div>
+        <template v-else>
+          <img
+            v-if="imageBlobUrl"
+            :src="imageBlobUrl"
+            :alt="photo.name || 'Photo'"
+            class="lightbox-image"
+          />
+          <!-- Show loading indicator over thumbnail while full-size loads -->
+          <div v-if="imageLoading && imageBlobUrl" class="lightbox-loading-overlay">
+            <span class="loading-spinner"></span>
+          </div>
+        </template>
+
+        <!-- Navigation: Next (inside image container) -->
+        <button
+          v-if="canNavigateNext"
+          class="lightbox-nav lightbox-nav-next"
+          @click.stop="navigate('next')"
+          aria-label="Next photo"
+        >
+          <span class="nav-arrow">&#8250;</span>
+        </button>
       </div>
 
       <!-- Bottom panel with download and metadata -->
@@ -182,9 +195,11 @@ const props = withDefaults(defineProps<{
   photo: Resource | null
   groupPhotos?: Resource[]
   currentIndex?: number
+  thumbnailCache?: Map<string, string>  // Thumbnail blob URLs from parent
 }>(), {
   groupPhotos: () => [],
-  currentIndex: 0
+  currentIndex: 0,
+  thumbnailCache: () => new Map()
 })
 
 const emit = defineEmits<{
@@ -196,11 +211,37 @@ const clientService = useClientService()
 const configStore = useConfigStore()
 
 // Image loading state
-const imageBlobUrl = ref<string>('')
 const imageLoading = ref(true)
+const imageKey = ref(0)
+
+// Cache for loaded images
+const imageCache = ref<Map<string, string>>(new Map())
+
+// Fixed frame dimensions based on viewport (calculated once on mount)
+const frameWidth = ref(Math.min(1200, Math.round(window.innerWidth * 0.85)))
+const frameHeight = ref(Math.min(800, Math.round(window.innerHeight * 0.6)))
+
+// Touch handling state
+let touchStartX = 0
+let touchStartY = 0
+let touchMoved = false
 
 // Cast to PhotoWithDate for accessing graphPhoto
 const photoWithDate = computed(() => props.photo as PhotoWithDate | null)
+
+// Get current image blob URL - prefer full-size from cache, fallback to thumbnail
+const imageBlobUrl = computed(() => {
+  if (!props.photo) return ''
+  const photoId = props.photo.id || (props.photo as any).fileId || props.photo.name
+  if (!photoId) return ''
+
+  // First try full-size image cache
+  const fullSize = imageCache.value.get(photoId)
+  if (fullSize) return fullSize
+
+  // Fallback to thumbnail from parent cache
+  return props.thumbnailCache.get(photoId) || ''
+})
 
 // Extract EXIF data from graphPhoto
 const exifData = computed<GraphPhoto>(() => {
@@ -211,49 +252,54 @@ const exifData = computed<GraphPhoto>(() => {
 const canNavigatePrev = computed(() => props.groupPhotos.length > 1 && props.currentIndex > 0)
 const canNavigateNext = computed(() => props.groupPhotos.length > 1 && props.currentIndex < props.groupPhotos.length - 1)
 
-// Load image when photo changes
+// Load current image immediately, then preload others in background
 watch(() => props.photo, async (newPhoto) => {
   if (newPhoto) {
-    await loadImage(newPhoto as PhotoWithDate)
+    imageKey.value++
+    await loadCurrentImage(newPhoto as PhotoWithDate)
   }
 }, { immediate: true })
 
-async function loadImage(photo: PhotoWithDate) {
-  imageLoading.value = true
-  imageBlobUrl.value = ''
+// Preload nearby images when navigating or group changes
+watch([() => props.groupPhotos, () => props.currentIndex], ([photos, currentIdx]) => {
+  if (photos.length > 1) {
+    preloadNearbyImages(photos as PhotoWithDate[], currentIdx)
+  }
+}, { immediate: true })
 
+function getPhotoUrl(photo: PhotoWithDate): string | null {
   const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
 
-  // Get the full path (includes folder structure) - use our custom filePath property
   const filePath = (photo as any).filePath || (photo as any).path || photo.name || ''
-  if (!filePath) {
-    console.error('[Lightbox] No file path available')
-    imageLoading.value = false
-    return
-  }
+  if (!filePath) return null
 
-  // Get spaceId from photo ID (format: storageId$spaceId!nodeId)
-  // Or from parentReference.driveId
   let spaceId = (photo as any).parentReference?.driveId || ''
   if (!spaceId && photo.id) {
-    // Extract driveId from item id: storageId$spaceId!nodeId → storageId$spaceId
     const idParts = photo.id.split('!')
     if (idParts.length > 0) {
       spaceId = idParts[0]
     }
   }
+  if (!spaceId) return null
 
-  if (!spaceId) {
-    console.error('[Lightbox] No spaceId available')
+  const encodedPath = filePath.split('/').map((segment: string) => encodeURIComponent(segment)).join('/')
+  return `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
+}
+
+// Load the current image immediately
+async function loadCurrentImage(photo: PhotoWithDate) {
+  // Check if already cached
+  if (photo.id && imageCache.value.has(photo.id)) {
     imageLoading.value = false
     return
   }
 
-  // Encode each path segment separately to handle spaces in folder/file names
-  const encodedPath = filePath.split('/').map((segment: string) => encodeURIComponent(segment)).join('/')
-
-  // Construct the WebDAV URL for full image (no preview params for full quality)
-  const url = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
+  imageLoading.value = true
+  const url = getPhotoUrl(photo)
+  if (!url || !photo.id) {
+    imageLoading.value = false
+    return
+  }
 
   try {
     const response = await clientService.httpAuthenticated.get(url, {
@@ -261,20 +307,83 @@ async function loadImage(photo: PhotoWithDate) {
     } as any)
 
     const blob = response.data as Blob
-    imageBlobUrl.value = URL.createObjectURL(blob)
+    const blobUrl = URL.createObjectURL(blob)
+    imageCache.value.set(photo.id, blobUrl)
   } catch (err) {
-    console.error(`[Lightbox] Failed to load ${filePath}:`, err)
-    imageBlobUrl.value = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="10">Error</text></svg>'
+    console.error(`[Lightbox] Failed to load image:`, err)
+    if (photo.id) {
+      imageCache.value.set(photo.id, 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="10">Error</text></svg>')
+    }
   } finally {
     imageLoading.value = false
   }
 }
 
-function close() {
-  // Clean up blob URL
-  if (imageBlobUrl.value && imageBlobUrl.value.startsWith('blob:')) {
-    URL.revokeObjectURL(imageBlobUrl.value)
+// Preload next few images from current position (not all images)
+async function preloadNearbyImages(photos: PhotoWithDate[], currentIdx: number) {
+  const PRELOAD_AHEAD = 2  // Preload next 2 images
+  const MAX_CONCURRENT = 2
+
+  // Get next few photos that aren't cached yet
+  const toPreload: PhotoWithDate[] = []
+  for (let i = 1; i <= PRELOAD_AHEAD; i++) {
+    const nextIdx = currentIdx + i
+    if (nextIdx < photos.length) {
+      const photo = photos[nextIdx]
+      if (photo.id && !imageCache.value.has(photo.id)) {
+        toPreload.push(photo)
+      }
+    }
   }
+
+  if (toPreload.length === 0) return
+
+  let activeLoads = 0
+  const queue = [...toPreload]
+
+  async function loadNext() {
+    if (queue.length === 0 || activeLoads >= MAX_CONCURRENT) return
+
+    const photo = queue.shift()!
+    if (!photo.id || imageCache.value.has(photo.id)) {
+      loadNext()
+      return
+    }
+
+    activeLoads++
+    const url = getPhotoUrl(photo)
+
+    if (url) {
+      try {
+        const response = await clientService.httpAuthenticated.get(url, {
+          responseType: 'blob'
+        } as any)
+        const blob = response.data as Blob
+        const blobUrl = URL.createObjectURL(blob)
+        imageCache.value.set(photo.id, blobUrl)
+      } catch (err) {
+        // Silently fail for background preloads
+      }
+    }
+
+    activeLoads--
+    loadNext()
+  }
+
+  // Start initial batch
+  for (let i = 0; i < MAX_CONCURRENT; i++) {
+    loadNext()
+  }
+}
+
+function close() {
+  // Clean up all cached blob URLs
+  imageCache.value.forEach((blobUrl) => {
+    if (blobUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(blobUrl)
+    }
+  })
+  imageCache.value.clear()
   emit('close')
 }
 
@@ -293,18 +402,59 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
+// Touch handlers for swipe navigation
+function handleTouchStart(event: TouchEvent) {
+  touchStartX = event.touches[0].clientX
+  touchStartY = event.touches[0].clientY
+  touchMoved = false
+}
+
+function handleTouchMove(event: TouchEvent) {
+  touchMoved = true
+  // Prevent browser back/forward swipe navigation
+  const deltaX = Math.abs(event.touches[0].clientX - touchStartX)
+  const deltaY = Math.abs(event.touches[0].clientY - touchStartY)
+  if (deltaX > deltaY) {
+    event.preventDefault()
+  }
+}
+
+function handleTouchEnd(event: TouchEvent) {
+  if (!touchMoved) return
+
+  const touchEndX = event.changedTouches[0].clientX
+  const touchEndY = event.changedTouches[0].clientY
+  const deltaX = touchEndX - touchStartX
+  const deltaY = touchEndY - touchStartY
+
+  // Only trigger swipe if horizontal movement is greater than vertical
+  // and the swipe distance is significant (> 50px)
+  if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+    if (deltaX > 0 && canNavigatePrev.value) {
+      navigate('prev')
+    } else if (deltaX < 0 && canNavigateNext.value) {
+      navigate('next')
+    }
+  }
+}
+
 onMounted(() => {
   document.addEventListener('keydown', handleKeydown)
   document.body.style.overflow = 'hidden'
+  document.documentElement.style.overflow = 'hidden'
 })
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown)
   document.body.style.overflow = ''
-  // Clean up blob URL
-  if (imageBlobUrl.value && imageBlobUrl.value.startsWith('blob:')) {
-    URL.revokeObjectURL(imageBlobUrl.value)
-  }
+  document.documentElement.style.overflow = ''
+  // Clean up all cached blob URLs
+  imageCache.value.forEach((blobUrl) => {
+    if (blobUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(blobUrl)
+    }
+  })
+  imageCache.value.clear()
 })
 
 function formatSize(bytes: number): string {
@@ -378,17 +528,20 @@ function getMapUrl(lat: number, lon: number): string {
   align-items: center;
   justify-content: center;
   padding: 1rem;
+  overflow: hidden;
+  touch-action: pan-y pinch-zoom;
+  overscroll-behavior-x: none;
 }
 
 .lightbox-container {
   display: flex;
   flex-direction: column;
-  max-width: 90vw;
-  max-height: 90vh;
   background: var(--oc-color-background-default, #fff);
   border-radius: 8px;
   overflow: hidden;
   position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
 }
 
 .lightbox-close {
@@ -416,12 +569,13 @@ function getMapUrl(lat: number, lon: number): string {
 
 .lightbox-nav {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
   width: 3rem;
   height: 3rem;
   border: none;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(255, 255, 255, 0.2);
   color: white;
   font-size: 1.5rem;
   border-radius: 50%;
@@ -434,12 +588,12 @@ function getMapUrl(lat: number, lon: number): string {
 }
 
 .lightbox-nav:hover {
-  background: rgba(0, 0, 0, 0.7);
-  transform: translateY(-50%) scale(1.1);
+  background: rgba(255, 255, 255, 0.4);
+  transform: scale(1.1);
 }
 
-.lightbox-nav-prev { left: 1rem; }
-.lightbox-nav-next { right: 1rem; }
+.lightbox-nav-prev { left: 0.5rem; }
+.lightbox-nav-next { right: 0.5rem; }
 
 .nav-arrow {
   font-weight: bold;
@@ -461,14 +615,13 @@ function getMapUrl(lat: number, lon: number): string {
 }
 
 .lightbox-image-container {
-  flex: 1;
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #000;
-  min-height: 300px;
-  max-height: 60vh;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .lightbox-loading {
@@ -476,9 +629,33 @@ function getMapUrl(lat: number, lon: number): string {
   font-size: 1.2rem;
 }
 
+.lightbox-loading-overlay {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 0.5rem;
+  border-radius: 4px;
+  z-index: 5;
+}
+
+.loading-spinner {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .lightbox-image {
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
@@ -486,8 +663,7 @@ function getMapUrl(lat: number, lon: number): string {
   background: var(--oc-color-background-default, #fff);
   padding: 1rem;
   border-top: 1px solid var(--oc-color-border, #e0e0e0);
-  max-height: 30vh;
-  overflow-y: auto;
+  flex-shrink: 0;
 }
 
 .lightbox-header {
@@ -579,5 +755,16 @@ function getMapUrl(lat: number, lon: number): string {
 
 .map-link:hover {
   background: var(--oc-color-swatch-primary-hover, #0060d0);
+}
+
+/* Fade transition for image changes */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
