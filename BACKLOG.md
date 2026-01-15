@@ -30,6 +30,14 @@
 - **Impact:** 4s wait → 0.5s wait
 - **Prompt:** `prompt-date-filtered-search.md`
 
+### 🔴 BUG: EXIF Toggle No Longer Functions
+- [ ] **Update search query to respect EXIF toggle state**
+- After switching from folder crawling to Search API, the "EXIF only" toggle no longer filters results
+- **When EXIF toggle ON:** Query should filter by `photo.takenDateTime` (only photos with EXIF capture date)
+- **When EXIF toggle OFF:** Query should use file `mtime` (modification time) to include all images
+- Currently search always uses `photo.takenDateTime`, ignoring toggle state
+- **Impact:** Users cannot view photos without EXIF data
+
 ---
 
 ## Phase 2: UI/UX Improvements
