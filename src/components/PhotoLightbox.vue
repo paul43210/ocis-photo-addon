@@ -41,6 +41,7 @@
       <div
         class="lightbox-image-container"
         :style="{ width: frameWidth + 'px', height: frameHeight + 'px' }"
+        @click="closeMenu"
         @touchstart="handleTouchStart"
         @touchmove="handleTouchMove"
         @touchend="handleTouchEnd"
@@ -87,21 +88,13 @@
         </button>
       </div>
 
-      <!-- Bottom panel with download and metadata -->
+      <!-- Bottom panel with metadata -->
       <div class="lightbox-panel">
         <div class="lightbox-header">
           <div class="lightbox-title-group">
             <h3 class="lightbox-title">{{ photo.name || 'Untitled' }}</h3>
             <span v-if="folderPath" class="lightbox-path">{{ folderPath }}</span>
           </div>
-          <a
-            :href="downloadUrl"
-            class="lightbox-download"
-            :download="photo.name"
-            @click.stop
-          >
-            Download
-          </a>
         </div>
 
         <!-- EXIF Metadata section -->
@@ -381,6 +374,26 @@ watch([() => props.groupPhotos, () => props.currentIndex], ([photos, currentIdx]
   }
 }, { immediate: true })
 
+// Create a nice placeholder SVG for files without thumbnails
+function createPlaceholderSvg(filename: string, large = false): string {
+  const ext = filename.split('.').pop()?.toUpperCase() || '?'
+  const size = large ? 200 : 100
+  const fontSize = large ? 24 : 12
+  const iconScale = large ? 2 : 1
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">
+    <rect fill="%23222" width="${size}" height="${size}"/>
+    <rect x="${25 * iconScale}" y="${35 * iconScale}" width="${50 * iconScale}" height="${35 * iconScale}" rx="${3 * iconScale}" fill="%23555"/>
+    <circle cx="${50 * iconScale}" cy="${52 * iconScale}" r="${10 * iconScale}" fill="%23222"/>
+    <circle cx="${50 * iconScale}" cy="${52 * iconScale}" r="${7 * iconScale}" fill="%23444"/>
+    <rect x="${35 * iconScale}" y="${30 * iconScale}" width="${12 * iconScale}" height="${6 * iconScale}" rx="${1 * iconScale}" fill="%23555"/>
+    <text x="${size / 2}" y="${large ? 170 : 85}" text-anchor="middle" fill="%23888" font-size="${fontSize}" font-family="system-ui, sans-serif" font-weight="600">${ext}</text>
+    <text x="${size / 2}" y="${large ? 190 : 95}" text-anchor="middle" fill="%23666" font-size="${fontSize * 0.7}" font-family="system-ui, sans-serif">No preview</text>
+  </svg>`
+
+  return 'data:image/svg+xml,' + encodeURIComponent(svg)
+}
+
 function getPhotoUrl(photo: PhotoWithDate, preview = false): string | null {
   const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
 
@@ -434,6 +447,9 @@ async function loadCurrentImage(photo: PhotoWithDate) {
         previewCache.value.set(photo.id, blobUrl)
       } catch (err) {
         console.error(`[Lightbox] Failed to load preview:`, err)
+        // Cache placeholder for preview
+        const filename = photo.name || 'unknown'
+        previewCache.value.set(photo.id, createPlaceholderSvg(filename, true))
       }
     }
   }
@@ -456,7 +472,8 @@ async function loadCurrentImage(photo: PhotoWithDate) {
   } catch (err) {
     console.error(`[Lightbox] Failed to load image:`, err)
     if (photo.id) {
-      imageCache.value.set(photo.id, 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="10">Error</text></svg>')
+      const filename = photo.name || 'unknown'
+      imageCache.value.set(photo.id, createPlaceholderSvg(filename, true))
     }
   } finally {
     imageLoading.value = false

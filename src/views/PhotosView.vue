@@ -1,8 +1,16 @@
 <template>
-  <div class="photos-app" ref="scrollContainer" @scroll="handleScroll">
+  <div
+    class="photos-app"
+    ref="scrollContainer"
+    @scroll="handleScroll"
+    @touchstart="handlePinchStart"
+    @touchmove="handlePinchMove"
+    @touchend="handlePinchEnd"
+    @wheel="handleWheel"
+  >
     <div class="photos-header">
       <div class="header-top">
-        <h1>Photos</h1>
+        <h1>Photos ({{ photoCount }})</h1>
         <div class="header-controls">
           <!-- Date filter -->
           <div class="date-filter">
@@ -17,16 +25,19 @@
               Today
             </button>
           </div>
-          <!-- View mode selector -->
+          <!-- View type selector (Calendar / Map) -->
           <div class="view-selector">
-            <span class="control-label">Show by:</span>
             <button
-              v-for="mode in groupModes"
-              :key="mode.value"
-              :class="['view-btn', { active: groupMode === mode.value }]"
-              @click="changeGroupMode(mode.value)"
+              :class="['view-btn', { active: viewType === 'calendar' }]"
+              @click="viewType = 'calendar'"
             >
-              {{ mode.label }}
+              Calendar
+            </button>
+            <button
+              :class="['view-btn', { active: viewType === 'map' }]"
+              @click="viewType = 'map'"
+            >
+              Map
             </button>
           </div>
           <!-- EXIF only toggle -->
@@ -65,13 +76,12 @@
       </p>
       <p v-else-if="error" class="error">{{ error }}</p>
       <p v-else class="photo-count">
-        {{ photoCount }} photos
-        <span v-if="!isFullyLoaded" class="load-more-hint"> - scroll for more</span>
-        <span v-if="isFullyLoaded" class="complete-hint"> - all loaded</span>
+        <span v-if="isFullyLoaded" class="complete-hint">All photos loaded</span>
       </p>
     </div>
 
-    <div v-if="!error" class="photos-content">
+    <!-- Calendar View -->
+    <div v-if="!error && viewType === 'calendar'" class="photos-content">
       <div v-if="!loading && photoCount === 0" class="empty-state">
         <span class="empty-icon">📷</span>
         <p>No photos found</p>
@@ -129,6 +139,15 @@
       </div>
     </div>
 
+    <!-- Map View (placeholder) -->
+    <div v-if="!error && viewType === 'map'" class="map-view-container">
+      <div class="map-placeholder">
+        <span class="map-icon">🗺️</span>
+        <h2>Map View</h2>
+        <p>Coming soon! Photos with GPS location data will be displayed on an interactive map.</p>
+      </div>
+    </div>
+
     <!-- Photo Lightbox with navigation -->
     <PhotoLightbox
       :photo="selectedPhoto"
@@ -148,6 +167,13 @@
       @close="closeContextMenu"
       @action="handleContextAction"
     />
+
+    <!-- Zoom level indicator -->
+    <transition name="zoom-fade">
+      <div v-if="showZoomIndicator" class="zoom-indicator">
+        {{ zoomIndicatorText }}
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -230,6 +256,7 @@ const groupModes = [
 // LocalStorage keys for persistent settings
 const STORAGE_KEY_GROUP_MODE = 'photo-addon:groupMode'
 const STORAGE_KEY_EXIF_ONLY = 'photo-addon:exifOnly'
+const STORAGE_KEY_VIEW_TYPE = 'photo-addon:viewType'
 
 // Load initial values from localStorage
 function getStoredGroupMode(): GroupMode {
@@ -249,10 +276,122 @@ function getStoredExifOnly(): boolean {
   return false
 }
 
+// View type (calendar or map)
+type ViewType = 'calendar' | 'map'
+
+function getStoredViewType(): ViewType {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_VIEW_TYPE)
+    if (saved && ['calendar', 'map'].includes(saved)) {
+      return saved as ViewType
+    }
+  } catch (e) { /* ignore */ }
+  return 'calendar'
+}
+
 const groupMode = ref<GroupMode>(getStoredGroupMode())
+const viewType = ref<ViewType>(getStoredViewType())
 
 // EXIF-only filter toggle
 const exifOnly = ref(getStoredExifOnly())
+
+// Pinch-to-zoom state
+const showZoomIndicator = ref(false)
+let zoomIndicatorTimeout: number | null = null
+let initialPinchDistance = 0
+let isPinching = false
+
+// Zoom levels for pinch gesture
+const zoomLevels: GroupMode[] = ['day', 'week', 'month', 'year']
+
+// Zoom indicator text
+const zoomIndicatorText = computed(() => {
+  switch (groupMode.value) {
+    case 'day': return 'Day'
+    case 'week': return 'Week'
+    case 'month': return 'Month'
+    case 'year': return 'Year'
+    default: return ''
+  }
+})
+
+// Get distance between two touch points
+function getTouchDistance(touches: TouchList): number {
+  if (touches.length < 2) return 0
+  const dx = touches[0].clientX - touches[1].clientX
+  const dy = touches[0].clientY - touches[1].clientY
+  return Math.sqrt(dx * dx + dy * dy)
+}
+
+// Show zoom feedback indicator
+function showZoomFeedback() {
+  showZoomIndicator.value = true
+  if (zoomIndicatorTimeout) clearTimeout(zoomIndicatorTimeout)
+  zoomIndicatorTimeout = window.setTimeout(() => {
+    showZoomIndicator.value = false
+  }, 800)
+}
+
+// Zoom in (more detail: year -> month -> week -> day)
+function zoomIn() {
+  const currentIndex = zoomLevels.indexOf(groupMode.value)
+  if (currentIndex > 0) {
+    groupMode.value = zoomLevels[currentIndex - 1]
+    showZoomFeedback()
+  }
+}
+
+// Zoom out (less detail: day -> week -> month -> year)
+function zoomOut() {
+  const currentIndex = zoomLevels.indexOf(groupMode.value)
+  if (currentIndex < zoomLevels.length - 1) {
+    groupMode.value = zoomLevels[currentIndex + 1]
+    showZoomFeedback()
+  }
+}
+
+// Pinch gesture handlers
+function handlePinchStart(event: TouchEvent) {
+  if (event.touches.length === 2) {
+    isPinching = true
+    initialPinchDistance = getTouchDistance(event.touches)
+  }
+}
+
+function handlePinchMove(event: TouchEvent) {
+  if (!isPinching || event.touches.length !== 2) return
+
+  const currentDistance = getTouchDistance(event.touches)
+  const ratio = currentDistance / initialPinchDistance
+
+  // Change zoom at specific thresholds (continuous pinch)
+  if (ratio < 0.6) {
+    zoomIn()
+    initialPinchDistance = currentDistance // Reset baseline
+  } else if (ratio > 1.6) {
+    zoomOut()
+    initialPinchDistance = currentDistance // Reset baseline
+  }
+}
+
+function handlePinchEnd(event: TouchEvent) {
+  if (isPinching && event.touches.length < 2) {
+    isPinching = false
+    initialPinchDistance = 0
+  }
+}
+
+// Desktop: Ctrl+scroll wheel to zoom
+function handleWheel(event: WheelEvent) {
+  if (event.ctrlKey) {
+    event.preventDefault()
+    if (event.deltaY > 0) {
+      zoomOut()
+    } else {
+      zoomIn()
+    }
+  }
+}
 
 // Refs
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -464,7 +603,39 @@ function getPhotoTimestamp(photo: PhotoWithDate): number {
 }
 
 /**
- * Create sub-groups (stacks) from photos based on time proximity
+ * Calculate distance between two GPS coordinates using Haversine formula
+ * Returns distance in meters
+ */
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000 // Earth's radius in meters
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+/**
+ * Get GPS location from a photo if available
+ */
+function getPhotoLocation(photo: PhotoWithDate): { lat: number, lon: number } | null {
+  const loc = photo.graphPhoto?.location
+  if (loc?.latitude != null && loc?.longitude != null) {
+    return { lat: loc.latitude, lon: loc.longitude }
+  }
+  return null
+}
+
+// Distance threshold for location-based stack separation (in meters)
+const LOCATION_DISTANCE_THRESHOLD = 500
+
+/**
+ * Create sub-groups (stacks) from photos based on time proximity and location
+ * Photos are split into new stacks if:
+ * - Time difference exceeds threshold, OR
+ * - Location distance exceeds 500m (when both photos have GPS data)
  */
 function createSubGroups(photos: PhotoWithDate[], mode: GroupMode): PhotoSubGroup[] {
   if (photos.length === 0) return []
@@ -480,14 +651,39 @@ function createSubGroups(photos: PhotoWithDate[], mode: GroupMode): PhotoSubGrou
   const groups: PhotoSubGroup[] = []
   let currentGroup: PhotoWithDate[] = [sorted[0]]
   let currentGroupTime = sorted[0].timestamp
+  let currentGroupLocation = getPhotoLocation(sorted[0])
 
   for (let i = 1; i < sorted.length; i++) {
     const photo = sorted[i]
     const timeDiff = Math.abs(currentGroupTime - photo.timestamp)
+    const photoLocation = getPhotoLocation(photo)
 
-    if (timeDiff <= threshold) {
+    // Check if we should start a new group
+    let shouldSplit = false
+
+    // Time-based split
+    if (timeDiff > threshold) {
+      shouldSplit = true
+    }
+
+    // Location-based split (only if both photos have GPS data)
+    if (!shouldSplit && currentGroupLocation && photoLocation) {
+      const distance = calculateDistance(
+        currentGroupLocation.lat, currentGroupLocation.lon,
+        photoLocation.lat, photoLocation.lon
+      )
+      if (distance > LOCATION_DISTANCE_THRESHOLD) {
+        shouldSplit = true
+      }
+    }
+
+    if (!shouldSplit) {
       // Add to current group
       currentGroup.push(photo)
+      // Update group location if this photo has one and group doesn't
+      if (!currentGroupLocation && photoLocation) {
+        currentGroupLocation = photoLocation
+      }
     } else {
       // Finish current group and start new one
       groups.push({
@@ -497,6 +693,7 @@ function createSubGroups(photos: PhotoWithDate[], mode: GroupMode): PhotoSubGrou
       })
       currentGroup = [photo]
       currentGroupTime = photo.timestamp
+      currentGroupLocation = photoLocation
     }
   }
 
@@ -1244,6 +1441,24 @@ function processQueue() {
   }
 }
 
+// Create a nice placeholder SVG for files without thumbnails
+function createPlaceholderSvg(filename: string): string {
+  // Extract file extension
+  const ext = filename.split('.').pop()?.toUpperCase() || '?'
+
+  // Create an SVG with a camera icon and file extension
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+    <rect fill="%23f0f0f0" width="100" height="100" rx="4"/>
+    <rect x="25" y="35" width="50" height="35" rx="3" fill="%23999"/>
+    <circle cx="50" cy="52" r="10" fill="%23f0f0f0"/>
+    <circle cx="50" cy="52" r="7" fill="%23777"/>
+    <rect x="35" y="30" width="12" height="6" rx="1" fill="%23999"/>
+    <text x="50" y="85" text-anchor="middle" fill="%23666" font-size="12" font-family="system-ui, sans-serif" font-weight="600">${ext}</text>
+  </svg>`
+
+  return 'data:image/svg+xml,' + encodeURIComponent(svg)
+}
+
 // Fetch image with authentication and cache as blob URL
 async function doFetch(photo: PhotoWithDate, cacheKey: string) {
   if (blobUrlCache.has(cacheKey)) return
@@ -1273,8 +1488,15 @@ async function doFetch(photo: PhotoWithDate, cacheKey: string) {
       allPhotos.value = [...allPhotos.value]
     }
   } catch (err) {
-    // Silently cache error placeholder
-    blobUrlCache.set(cacheKey, 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="10">Error</text></svg>')
+    // Cache a nice placeholder showing file type
+    const filename = photo.name || photoPath.split('/').pop() || 'unknown'
+    blobUrlCache.set(cacheKey, createPlaceholderSvg(filename))
+
+    // Trigger reactivity update for placeholder
+    const index = allPhotos.value.findIndex(p => (p.id || p.fileId || p.name) === cacheKey)
+    if (index >= 0) {
+      allPhotos.value = [...allPhotos.value]
+    }
   }
 }
 
@@ -1534,13 +1756,14 @@ function injectStyles() {
       overflow-x: hidden;
       max-height: calc(100vh - 60px);
       background: var(--oc-color-background-default, #fff);
+      touch-action: pan-y; /* Allow vertical scroll, prevent browser pinch-zoom */
     }
     .photos-header {
       margin-bottom: 1rem;
       position: sticky;
       top: 0;
       background: var(--oc-color-background-default, #fff);
-      z-index: 100;
+      z-index: 10;
       padding: 1rem 0 0.5rem 0;
       margin-left: -1.5rem;
       margin-right: -1.5rem;
@@ -1776,12 +1999,14 @@ function injectStyles() {
     }
     .photo-item {
       position: relative;
+      z-index: 0;
       aspect-ratio: 1;
       overflow: hidden;
       border-radius: 8px;
       cursor: pointer;
       background: var(--oc-color-background-muted, #f5f5f5);
       transition: transform 0.2s, box-shadow 0.2s;
+      isolation: isolate;
     }
     .photo-item:hover {
       transform: scale(1.02);
@@ -2063,8 +2288,10 @@ function injectStyles() {
     /* PhotoStack styles */
     .photo-stack {
       position: relative;
+      z-index: 0;
       aspect-ratio: 1;
       cursor: pointer;
+      isolation: isolate;
     }
     .stack-layer {
       position: absolute;
@@ -2144,6 +2371,64 @@ function injectStyles() {
       font-size: 0.65rem;
       opacity: 0.8;
     }
+
+    /* Zoom level indicator */
+    .zoom-indicator {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.75);
+      color: white;
+      padding: 2rem 4rem;
+      border-radius: 16px;
+      font-size: 3rem;
+      font-weight: 600;
+      z-index: 1000;
+      pointer-events: none;
+    }
+
+    .zoom-fade-enter-active,
+    .zoom-fade-leave-active {
+      transition: opacity 0.3s ease;
+    }
+
+    .zoom-fade-enter-from,
+    .zoom-fade-leave-to {
+      opacity: 0;
+    }
+
+    /* Map view placeholder */
+    .map-view-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 400px;
+      padding: 2rem;
+    }
+    .map-placeholder {
+      text-align: center;
+      padding: 3rem 2rem;
+      background: var(--oc-color-background-muted, #f5f5f5);
+      border-radius: 12px;
+      max-width: 400px;
+    }
+    .map-placeholder .map-icon {
+      font-size: 4rem;
+      display: block;
+      margin-bottom: 1rem;
+    }
+    .map-placeholder h2 {
+      margin: 0 0 0.75rem 0;
+      font-size: 1.5rem;
+      color: var(--oc-color-text-default, #333);
+    }
+    .map-placeholder p {
+      margin: 0;
+      color: var(--oc-color-text-muted, #666);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
   `
   document.head.appendChild(style)
 }
@@ -2165,6 +2450,14 @@ watch(exifOnly, (newVal) => {
   }
   // Reload photos with new filter when toggle changes
   loadPhotos()
+})
+
+watch(viewType, (newVal) => {
+  try {
+    localStorage.setItem(STORAGE_KEY_VIEW_TYPE, newVal)
+  } catch (e) {
+    // ignore
+  }
 })
 
 onMounted(() => {

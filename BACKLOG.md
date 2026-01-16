@@ -136,17 +136,17 @@
 ## Phase 4: Map View
 
 ### 🟡 Map Integration
-- [🟢] Map view showing photo locations (GPS)
-- [ ] Search for all files within visible map bounds
-- [ ] Cluster markers for photos within X km of each other
+- [ ] Map view showing photo locations (GPS)
+- [ ] Cluster markers for nearby photos
 - [ ] Dynamic clustering based on zoom level
-- [ ] Click cluster to expand or show photo grid
+- [ ] Click marker to open photo in lightbox
+- [ ] Click cluster to zoom in
 - [ ] "View on Map" from individual photo (exists in lightbox)
+- [ ] Search for all files within visible map bounds (future)
+- **Prompt:** `prompt-map-view.md`
 
-### Map Library Options
-- Leaflet.js (open source, no API key)
-- OpenStreetMap tiles
-- Optional: Google Maps / Mapbox for premium features
+### Map Library
+- Leaflet.js + OpenStreetMap (open source, no API key, free)
 
 ---
 
