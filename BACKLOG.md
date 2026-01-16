@@ -39,6 +39,17 @@
 - **Impact:** Users cannot view photos without EXIF data
 - **Prompt:** `prompt-fix-exif-toggle.md`
 
+### 🔴 BUG: oCIS Thumbnails Are Cropped (Backend)
+- [ ] **Fix oCIS preview endpoint to respect aspect ratio**
+- The `?preview=1&x=W&y=H&a=1` parameter should preserve aspect ratio but oCIS crops to fill
+- Even when requesting exact image dimensions (e.g., `x=653&y=868` for a 653x868 image), the preview is cropped
+- **Impact:** Lightbox shows jarring "zoom out" effect when full image replaces thumbnail
+- **Requires:** Backend changes to oCIS fork (not frontend)
+- **Repository:** `github.com/paul43210/ocis` (`feature/photo-metadata-search` branch)
+- **Test URL:** `https://cloud.faure.ca/dav/spaces/{spaceId}/path/to/photo.jpg?preview=1&x=653&y=868&a=1`
+- **Expected:** Preview maintains full image framing, just at lower resolution
+- **Actual:** Preview is center-cropped to fill requested dimensions
+
 ---
 
 ## Phase 2: UI/UX Improvements
