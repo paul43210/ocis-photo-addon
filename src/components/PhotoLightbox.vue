@@ -1,10 +1,36 @@
 <template>
-  <div v-if="photo" class="lightbox-overlay" @click.self="close" @keydown.escape="close">
-    <div class="lightbox-container">
-      <!-- Close button -->
-      <button class="lightbox-close" @click="close" aria-label="Close">
-        &times;
+  <div v-if="photo" class="lightbox-overlay" @click.self="closeIfNoMenu" @keydown.escape="close">
+    <!-- Context Menu (inside overlay for proper stacking) -->
+    <div v-if="menuVisible" :style="menuStyle" @click.stop>
+      <button :style="menuItemStyle" @click="handleMenuAction('download')" @mouseenter="$event.target.style.background='#f5f5f5'" @mouseleave="$event.target.style.background='none'">
+        <span style="width: 18px; opacity: 0.7;">↓</span>
+        <span>Download</span>
       </button>
+      <button :style="menuItemStyle" @click="handleMenuAction('openInFiles')" @mouseenter="$event.target.style.background='#f5f5f5'" @mouseleave="$event.target.style.background='none'">
+        <span style="width: 18px; opacity: 0.7;">→</span>
+        <span>Open in Files</span>
+      </button>
+      <button :style="menuItemStyle" @click="handleMenuAction('copyLink')" @mouseenter="$event.target.style.background='#f5f5f5'" @mouseleave="$event.target.style.background='none'">
+        <span style="width: 18px; opacity: 0.7;">⎘</span>
+        <span>Copy Link</span>
+      </button>
+      <div style="height: 1px; background: #eee; margin: 6px 0;"></div>
+      <button :style="menuItemDangerStyle" @click="handleMenuAction('delete')" @mouseenter="$event.target.style.background='#fff0f0'" @mouseleave="$event.target.style.background='none'">
+        <span style="width: 18px; opacity: 0.7;">✕</span>
+        <span>Delete</span>
+      </button>
+    </div>
+
+    <div class="lightbox-container">
+      <!-- Top right buttons -->
+      <div class="lightbox-top-buttons">
+        <button ref="menuButtonRef" class="lightbox-menu-btn" @click.stop="toggleMenu($event)" aria-label="Photo options">
+          ⋮
+        </button>
+        <button class="lightbox-close" @click="close" aria-label="Close">
+          &times;
+        </button>
+      </div>
 
       <!-- Photo counter -->
       <div v-if="groupPhotos.length > 1" class="lightbox-counter">
@@ -29,20 +55,26 @@
           <span class="nav-arrow">&#8249;</span>
         </button>
 
-        <!-- Show loading only if no thumbnail available -->
-        <div v-if="imageLoading && !imageBlobUrl" class="lightbox-loading">Loading...</div>
-        <template v-else>
-          <img
-            v-if="imageBlobUrl"
-            :src="imageBlobUrl"
-            :alt="photo.name || 'Photo'"
-            class="lightbox-image"
-          />
-          <!-- Show loading indicator over thumbnail while full-size loads -->
-          <div v-if="imageLoading && imageBlobUrl" class="lightbox-loading-overlay">
-            <span class="loading-spinner"></span>
-          </div>
-        </template>
+        <!-- Loading spinner while waiting for preview -->
+        <div v-if="!thumbnailUrl && !fullSizeUrl" class="lightbox-loading">
+          <span class="loading-spinner large"></span>
+        </div>
+
+        <!-- Preview image (shown until full-size loads) -->
+        <img
+          v-if="thumbnailUrl && !fullSizeUrl"
+          :src="thumbnailUrl"
+          :alt="photo.name || 'Photo'"
+          :style="imageStyle"
+        />
+
+        <!-- Full-size image (replaces preview when ready) -->
+        <img
+          v-if="fullSizeUrl"
+          :src="fullSizeUrl"
+          :alt="photo.name || 'Photo'"
+          :style="imageStyle"
+        />
 
         <!-- Navigation: Next (inside image container) -->
         <button
@@ -58,9 +90,12 @@
       <!-- Bottom panel with download and metadata -->
       <div class="lightbox-panel">
         <div class="lightbox-header">
-          <h3 class="lightbox-title">{{ photo.name || 'Untitled' }}</h3>
+          <div class="lightbox-title-group">
+            <h3 class="lightbox-title">{{ photo.name || 'Untitled' }}</h3>
+            <span v-if="folderPath" class="lightbox-path">{{ folderPath }}</span>
+          </div>
           <a
-            :href="imageBlobUrl"
+            :href="downloadUrl"
             class="lightbox-download"
             :download="photo.name"
             @click.stop
@@ -205,17 +240,70 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'navigate', direction: 'prev' | 'next'): void
+  (e: 'action', action: string, photo: Resource): void
 }>()
 
 const clientService = useClientService()
 const configStore = useConfigStore()
 
+// Context menu state
+const menuVisible = ref(false)
+const menuTop = ref('0px')
+const menuLeft = ref('0px')
+const menuButtonRef = ref<HTMLButtonElement | null>(null)
+
+// Computed style for menu positioning
+const menuStyle = computed(() => ({
+  position: 'fixed' as const,
+  display: 'flex',
+  flexDirection: 'column' as const,
+  top: menuTop.value,
+  left: menuLeft.value,
+  zIndex: 10001,
+  background: '#fff',
+  borderRadius: '8px',
+  boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
+  minWidth: '160px',
+  padding: '6px 0',
+  overflow: 'hidden'
+}))
+
+// Computed style for menu items
+const menuItemStyle = computed(() => ({
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+  width: '100%',
+  padding: '10px 16px',
+  border: 'none',
+  background: 'none',
+  cursor: 'pointer',
+  fontSize: '14px',
+  color: '#333',
+  textAlign: 'left' as const,
+  fontFamily: 'inherit',
+  WebkitAppearance: 'none' as const,
+  MozAppearance: 'none' as const,
+  appearance: 'none' as const,
+  outline: 'none',
+  boxSizing: 'border-box' as const
+}))
+
+// Computed style for danger menu item
+const menuItemDangerStyle = computed(() => ({
+  ...menuItemStyle.value,
+  color: '#dc3545'
+}))
+
 // Image loading state
 const imageLoading = ref(true)
 const imageKey = ref(0)
 
-// Cache for loaded images
+// Cache for loaded images (full-size)
 const imageCache = ref<Map<string, string>>(new Map())
+
+// Cache for lightbox previews (larger than grid thumbnails, same aspect ratio as full)
+const previewCache = ref<Map<string, string>>(new Map())
 
 // Fixed frame dimensions based on viewport (calculated once on mount)
 const frameWidth = ref(Math.min(1200, Math.round(window.innerWidth * 0.85)))
@@ -229,19 +317,35 @@ let touchMoved = false
 // Cast to PhotoWithDate for accessing graphPhoto
 const photoWithDate = computed(() => props.photo as PhotoWithDate | null)
 
-// Get current image blob URL - prefer full-size from cache, fallback to thumbnail
-const imageBlobUrl = computed(() => {
+// Get preview URL from lightbox preview cache (larger preview matching frame aspect ratio)
+const thumbnailUrl = computed(() => {
   if (!props.photo) return ''
   const photoId = props.photo.id || (props.photo as any).fileId || props.photo.name
   if (!photoId) return ''
-
-  // First try full-size image cache
-  const fullSize = imageCache.value.get(photoId)
-  if (fullSize) return fullSize
-
-  // Fallback to thumbnail from parent cache
-  return props.thumbnailCache.get(photoId) || ''
+  return previewCache.value.get(photoId) || ''
 })
+
+// Get full-size image URL from local cache
+const fullSizeUrl = computed(() => {
+  if (!props.photo) return ''
+  const photoId = props.photo.id || (props.photo as any).fileId || props.photo.name
+  if (!photoId) return ''
+  return imageCache.value.get(photoId) || ''
+})
+
+// Combined URL for download link (prefer full-size)
+const downloadUrl = computed(() => fullSizeUrl.value || thumbnailUrl.value)
+
+// Inline style for stacked images
+const imageStyle = {
+  position: 'absolute' as const,
+  top: 0,
+  left: 0,
+  width: '100%',
+  height: '100%',
+  objectFit: 'contain' as const,
+  zIndex: 1
+}
 
 // Extract EXIF data from graphPhoto
 const exifData = computed<GraphPhoto>(() => {
@@ -251,6 +355,16 @@ const exifData = computed<GraphPhoto>(() => {
 // Navigation computed
 const canNavigatePrev = computed(() => props.groupPhotos.length > 1 && props.currentIndex > 0)
 const canNavigateNext = computed(() => props.groupPhotos.length > 1 && props.currentIndex < props.groupPhotos.length - 1)
+
+// Extract folder path (without filename) from photo's filePath
+const folderPath = computed(() => {
+  const p = props.photo as PhotoWithDate | null
+  if (!p?.filePath) return ''
+  // Remove filename from path
+  const lastSlash = p.filePath.lastIndexOf('/')
+  if (lastSlash <= 0) return '/'
+  return p.filePath.substring(0, lastSlash + 1)
+})
 
 // Load current image immediately, then preload others in background
 watch(() => props.photo, async (newPhoto) => {
@@ -267,7 +381,7 @@ watch([() => props.groupPhotos, () => props.currentIndex], ([photos, currentIdx]
   }
 }, { immediate: true })
 
-function getPhotoUrl(photo: PhotoWithDate): string | null {
+function getPhotoUrl(photo: PhotoWithDate, preview = false): string | null {
   const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
 
   const filePath = (photo as any).filePath || (photo as any).path || photo.name || ''
@@ -283,26 +397,56 @@ function getPhotoUrl(photo: PhotoWithDate): string | null {
   if (!spaceId) return null
 
   const encodedPath = filePath.split('/').map((segment: string) => encodeURIComponent(segment)).join('/')
-  return `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
+  const baseUrl = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
+
+  if (preview) {
+    // Request preview matching lightbox frame dimensions with aspect ratio preserved
+    return `${baseUrl}?preview=1&x=${frameWidth.value}&y=${frameHeight.value}&a=1`
+  }
+  return baseUrl
 }
 
-// Load the current image immediately
+// Load the current image: first load preview, then full-size
 async function loadCurrentImage(photo: PhotoWithDate) {
-  // Check if already cached
-  if (photo.id && imageCache.value.has(photo.id)) {
+  if (!photo.id) {
+    imageLoading.value = false
+    return
+  }
+
+  // Check if full-size already cached
+  if (imageCache.value.has(photo.id)) {
     imageLoading.value = false
     return
   }
 
   imageLoading.value = true
-  const url = getPhotoUrl(photo)
-  if (!url || !photo.id) {
+
+  // Step 1: Load preview first (fast, matches aspect ratio)
+  if (!previewCache.value.has(photo.id)) {
+    const previewUrl = getPhotoUrl(photo, true)
+    if (previewUrl) {
+      try {
+        const response = await clientService.httpAuthenticated.get(previewUrl, {
+          responseType: 'blob'
+        } as any)
+        const blob = response.data as Blob
+        const blobUrl = URL.createObjectURL(blob)
+        previewCache.value.set(photo.id, blobUrl)
+      } catch (err) {
+        console.error(`[Lightbox] Failed to load preview:`, err)
+      }
+    }
+  }
+
+  // Step 2: Load full-size image
+  const fullUrl = getPhotoUrl(photo, false)
+  if (!fullUrl) {
     imageLoading.value = false
     return
   }
 
   try {
-    const response = await clientService.httpAuthenticated.get(url, {
+    const response = await clientService.httpAuthenticated.get(fullUrl, {
       responseType: 'blob'
     } as any)
 
@@ -384,11 +528,58 @@ function close() {
     }
   })
   imageCache.value.clear()
+
+  // Clean up preview cache
+  previewCache.value.forEach((blobUrl) => {
+    if (blobUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(blobUrl)
+    }
+  })
+  previewCache.value.clear()
+
   emit('close')
 }
 
 function navigate(direction: 'prev' | 'next') {
+  menuVisible.value = false  // Close menu when navigating
   emit('navigate', direction)
+}
+
+function toggleMenu(event: MouseEvent) {
+  console.log('[Lightbox] toggleMenu called')
+  if (menuVisible.value) {
+    menuVisible.value = false
+  } else {
+    const button = event.currentTarget as HTMLElement
+    const rect = button.getBoundingClientRect()
+    const menuWidth = 160 // min-width from CSS
+    // Position menu so right edge aligns with right edge of button
+    const left = rect.right - menuWidth
+    menuTop.value = `${rect.bottom + 8}px`
+    menuLeft.value = `${Math.max(8, left)}px`
+    console.log('[Lightbox] menu position - top:', menuTop.value, 'left:', menuLeft.value, 'button rect:', rect)
+    menuVisible.value = true
+  }
+}
+
+function closeMenu() {
+  menuVisible.value = false
+}
+
+function closeIfNoMenu(event: MouseEvent) {
+  if (menuVisible.value) {
+    menuVisible.value = false
+  } else {
+    close()
+  }
+}
+
+function handleMenuAction(action: string) {
+  console.log('[Lightbox] handleMenuAction', action)
+  menuVisible.value = false
+  if (props.photo) {
+    emit('action', action, props.photo)
+  }
 }
 
 // Handle escape key and arrow keys
@@ -455,6 +646,14 @@ onUnmounted(() => {
     }
   })
   imageCache.value.clear()
+
+  // Clean up preview cache
+  previewCache.value.forEach((blobUrl) => {
+    if (blobUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(blobUrl)
+    }
+  })
+  previewCache.value.clear()
 })
 
 function formatSize(bytes: number): string {
@@ -533,6 +732,65 @@ function getMapUrl(lat: number, lon: number): string {
   overscroll-behavior-x: none;
 }
 
+/* Context Menu inside lightbox */
+.lightbox-context-menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  min-width: 160px;
+  padding: 6px 0;
+  z-index: 10001;
+  overflow: hidden;
+}
+
+.lbmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  text-align: left;
+  transition: background 0.15s;
+  font-family: inherit;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.lbmenu-item:hover {
+  background: #f5f5f5;
+}
+
+.lbmenu-item-danger {
+  color: #dc3545;
+}
+
+.lbmenu-item-danger:hover {
+  background: #fff0f0;
+}
+
+.lbmenu-icon {
+  width: 18px;
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.lbmenu-divider {
+  height: 1px;
+  background: #eee;
+  margin: 6px 0;
+}
+
 .lightbox-container {
   display: flex;
   flex-direction: column;
@@ -544,10 +802,36 @@ function getMapUrl(lat: number, lon: number): string {
   max-height: 90vh;
 }
 
-.lightbox-close {
+.lightbox-top-buttons {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+  z-index: 10;
+}
+
+.lightbox-menu-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  font-size: 1.25rem;
+  font-weight: bold;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.lightbox-menu-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.lightbox-close {
   width: 2.5rem;
   height: 2.5rem;
   border: none;
@@ -556,7 +840,6 @@ function getMapUrl(lat: number, lon: number): string {
   font-size: 1.5rem;
   border-radius: 50%;
   cursor: pointer;
-  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -616,17 +899,19 @@ function getMapUrl(lat: number, lon: number): string {
 
 .lightbox-image-container {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background: #000;
   overflow: hidden;
   flex-shrink: 0;
 }
 
 .lightbox-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   color: white;
   font-size: 1.2rem;
+  z-index: 1;
 }
 
 .lightbox-loading-overlay {
@@ -649,14 +934,32 @@ function getMapUrl(lat: number, lon: number): string {
   animation: spin 0.8s linear infinite;
 }
 
+.loading-spinner.large {
+  width: 48px;
+  height: 48px;
+  border-width: 3px;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
+/* Stack images with absolute positioning for seamless transition */
 .lightbox-image {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.lightbox-thumbnail {
+  z-index: 1;
+}
+
+.lightbox-fullsize {
+  z-index: 2;
 }
 
 .lightbox-panel {
@@ -673,6 +976,12 @@ function getMapUrl(lat: number, lon: number): string {
   margin-bottom: 1rem;
 }
 
+.lightbox-title-group {
+  flex: 1;
+  min-width: 0;
+  margin-right: 1rem;
+}
+
 .lightbox-title {
   margin: 0;
   font-size: 1.1rem;
@@ -681,8 +990,16 @@ function getMapUrl(lat: number, lon: number): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  flex: 1;
-  margin-right: 1rem;
+}
+
+.lightbox-path {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--oc-color-text-muted, #666);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 0.25rem;
 }
 
 .lightbox-download {

@@ -65,17 +65,18 @@
 - [🟡] Cleaner, more minimal interface
 
 ### 🟡 Calendar View (Pinch-to-Zoom Groupings)
-- [🔴] Implement pinch gesture recognition
+- [ ] Implement pinch gesture recognition
 - [ ] Day view (current default)
 - [ ] Week view (pinch out)
 - [ ] Month view (pinch out further)
 - [ ] Year view (maximum zoom out)
 - [🟢] Smooth transitions between zoom levels
+- **Prompt:** `prompt-pinch-zoom.md`
 
 ### 🟡 File Navigation
-- [🔴] Display the path to the photo in lightbox/details
+- [x] Display the path to the photo in lightbox/details
 - [🟡] Add "Open in Files" link to navigate to file location in standard oCIS view
-- [🔴] Breadcrumb navigation in photo view
+- [~] Breadcrumb navigation in photo view (implemented, commented out - revisit later)
 - **Prompt (lightbox path):** `prompt-lightbox-path.md`
 - **Prompt (breadcrumb):** `prompt-breadcrumb-nav.md`
 
@@ -98,10 +99,10 @@
 ## Phase 3: Photo Actions & Context Menu
 
 ### 🔴 Context Menu ("⋮" Three Dots)
-- [ ] Download original
-- [ ] Open in Files
-- [ ] Copy link to clipboard
-- [ ] Delete (with confirmation)
+- [x] Download original
+- [x] Open in Files
+- [x] Copy link to clipboard
+- [x] Delete (with confirmation)
 - [🟢] Rename photo (future)
 - [🟢] Move to folder (future)
 - [🟢] Copy to folder (future)
@@ -231,3 +232,5 @@
 - [x] Stack view: Touch responsiveness improvements
 - [x] UI cleanup: Removed EXIF indicator icon
 - [x] UI cleanup: Removed MDATE indicator icon
+- [x] Lightbox: Display photo folder path
+- [x] Context menu: Download, Open in Files, Copy Link, Delete

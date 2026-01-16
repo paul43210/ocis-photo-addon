@@ -36,6 +36,29 @@
           </label>
         </div>
       </div>
+
+      <!-- Breadcrumb Navigation (DISABLED)
+      <div class="breadcrumb-nav">
+        <button
+          class="breadcrumb-item"
+          :class="{ active: !selectedFolder }"
+          @click="clearFolderFilter"
+        >
+          All Photos
+        </button>
+        <template v-for="(part, index) in breadcrumbParts" :key="index">
+          <span class="breadcrumb-separator">›</span>
+          <button
+            class="breadcrumb-item"
+            :class="{ active: index === breadcrumbParts.length - 1 }"
+            @click="navigateToBreadcrumb(index)"
+          >
+            {{ part }}
+          </button>
+        </template>
+      </div>
+      -->
+
       <p v-if="loading" class="loading-status">
         <span class="spinner"></span>
         Loading {{ currentDateRange }}... {{ photoCount }} photos
@@ -76,6 +99,15 @@
                   loading="lazy"
                   @error="handleImageError"
                 />
+                <!-- Folder filter button (DISABLED)
+                <button
+                  class="folder-filter-btn"
+                  @click.stop="selectFolder(subGroup.photos[0].filePath || '')"
+                  title="Show photos from this folder"
+                >
+                  📁
+                </button>
+                -->
                 <div class="photo-overlay">
                   <span class="photo-name">{{ subGroup.photos[0].name }}</span>
                 </div>
@@ -105,6 +137,16 @@
       :thumbnail-cache="blobUrlCache"
       @close="closeLightbox"
       @navigate="navigatePhoto"
+      @action="handleLightboxAction"
+    />
+
+    <!-- Context Menu -->
+    <PhotoContextMenu
+      :visible="contextMenuVisible"
+      :photo="contextMenuPhoto"
+      :position="contextMenuPosition"
+      @close="closeContextMenu"
+      @action="handleContextAction"
     />
   </div>
 </template>
@@ -115,6 +157,7 @@ import { useClientService, useSpacesStore, useConfigStore } from '@ownclouders/w
 import { Resource, SpaceResource } from '@ownclouders/web-client'
 import PhotoLightbox from '../components/PhotoLightbox.vue'
 import PhotoStack from '../components/PhotoStack.vue'
+import PhotoContextMenu from '../components/PhotoContextMenu.vue'
 
 // Types for Graph API response
 interface GeoCoordinates {
@@ -221,6 +264,20 @@ const currentDateRange = ref('')
 const isFullyLoaded = ref(false)
 const selectedPhoto = ref<PhotoWithDate | null>(null)
 
+// Context menu state
+const contextMenuVisible = ref(false)
+const contextMenuPhoto = ref<PhotoWithDate | null>(null)
+const contextMenuPosition = ref({ x: 0, y: 0 })
+
+// Folder filter for breadcrumb navigation (DISABLED)
+// const selectedFolder = ref<string | null>(null) // null = all photos
+
+// Breadcrumb parts computed from selected folder path (DISABLED)
+// const breadcrumbParts = computed(() => {
+//   if (!selectedFolder.value) return []
+//   return selectedFolder.value.split('/').filter(Boolean)
+// })
+
 // Track loaded photo IDs to avoid duplicates
 const loadedPhotoIds = ref<Set<string>>(new Set())
 
@@ -293,15 +350,24 @@ function isImageFile(resource: Resource): boolean {
   return IMAGE_EXTENSIONS.has(ext)
 }
 
-// Filter photos based on EXIF toggle
+// Filter photos based on EXIF toggle and folder selection
 const displayedPhotos = computed(() => {
-  if (!exifOnly.value) {
-    return allPhotos.value
+  let photos = allPhotos.value
+
+  // Apply EXIF filter
+  if (exifOnly.value) {
+    photos = photos.filter(photo => photo.dateSource === 'photo.takenDateTime')
   }
-  // Filter to only photos with real EXIF data (not mdate/lastModifiedDateTime fallback)
-  return allPhotos.value.filter(photo => {
-    return photo.dateSource === 'photo.takenDateTime'
-  })
+
+  // Apply folder filter (DISABLED)
+  // if (selectedFolder.value) {
+  //   photos = photos.filter(photo => {
+  //     const path = (photo as any).filePath || ''
+  //     return path.startsWith(selectedFolder.value!)
+  //   })
+  // }
+
+  return photos
 })
 
 const photoCount = computed(() => displayedPhotos.value.length)
@@ -1253,9 +1319,205 @@ function closeLightbox() {
   currentPhotoIndex.value = 0
 }
 
+// Breadcrumb navigation functions (DISABLED)
+// function navigateToBreadcrumb(index: number) {
+//   const parts = breadcrumbParts.value.slice(0, index + 1)
+//   selectedFolder.value = '/' + parts.join('/') + '/'
+// }
+
+// function selectFolder(filePath: string) {
+//   // Extract folder from file path (remove filename)
+//   const lastSlash = filePath.lastIndexOf('/')
+//   selectedFolder.value = lastSlash > 0 ? filePath.substring(0, lastSlash + 1) : '/'
+// }
+
+// function clearFolderFilter() {
+//   selectedFolder.value = null
+// }
+
 function handleImageError(event: Event) {
   const img = event.target as HTMLImageElement
   img.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="12">No preview</text></svg>'
+}
+
+// Context menu functions
+function openContextMenu(event: MouseEvent, photo: PhotoWithDate) {
+  console.log('[PhotosView] openContextMenu called', event.clientX, event.clientY, photo)
+  event.preventDefault()
+  event.stopPropagation()
+  contextMenuPhoto.value = photo
+  contextMenuPosition.value = { x: event.clientX, y: event.clientY }
+  contextMenuVisible.value = true
+  console.log('[PhotosView] contextMenuVisible set to', contextMenuVisible.value)
+}
+
+function closeContextMenu() {
+  contextMenuVisible.value = false
+  contextMenuPhoto.value = null
+}
+
+function handleLightboxAction(action: string, photo: Resource) {
+  console.log('[PhotosView] handleLightboxAction called', action, photo)
+  handleContextAction(action, photo as PhotoWithDate)
+}
+
+async function handleContextAction(action: string, photo: PhotoWithDate) {
+  switch (action) {
+    case 'download':
+      await downloadPhoto(photo)
+      break
+    case 'openInFiles':
+      openInFiles(photo)
+      break
+    case 'copyLink':
+      await copyPhotoLink(photo)
+      break
+    case 'delete':
+      await confirmAndDelete(photo)
+      break
+  }
+}
+
+async function downloadPhoto(photo: PhotoWithDate) {
+  const cacheKey = photo.id || (photo as any).fileId || photo.name
+  let url = blobUrlCache.get(cacheKey)
+
+  if (!url || url.startsWith('data:')) {
+    // Fetch full image if not cached or is placeholder
+    const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
+    const spaceId = personalSpace?.id || ''
+    const photoPath = (photo as any).filePath || photo.name || ''
+    const encodedPath = photoPath.split('/').map((s: string) => encodeURIComponent(s)).join('/')
+    const fetchUrl = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
+
+    try {
+      const response = await clientService.httpAuthenticated.get(fetchUrl, {
+        responseType: 'blob'
+      } as any)
+      const blob = response.data as Blob
+      url = URL.createObjectURL(blob)
+    } catch (err) {
+      console.error('Failed to download photo:', err)
+      alert('Failed to download photo. Please try again.')
+      return
+    }
+  }
+
+  const link = document.createElement('a')
+  link.href = url
+  link.download = photo.name || 'photo'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+
+function openInFiles(photo: PhotoWithDate) {
+  const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
+  const fileId = (photo as any).fileId || photo.id || ''
+  const filePath = (photo as any).filePath || photo.name || ''
+
+  // Get the drive alias (e.g., "personal/paul")
+  const driveAlias = (personalSpace as any)?.driveAlias || 'personal/home'
+
+  // Build the full path for preview URL: driveAlias + filePath
+  const fullPath = `${driveAlias}${filePath}`
+  const encodedFullPath = fullPath.split('/').map((s: string) => encodeURIComponent(s)).join('/')
+
+  // Get folder path (without filename) for contextRouteParams
+  const lastSlash = filePath.lastIndexOf('/')
+  const folderPath = lastSlash > 0 ? filePath.substring(0, lastSlash) : ''
+  const driveAliasAndItem = `${driveAlias}${folderPath}`
+
+  // Get parent folder's fileId from parentReference if available
+  const parentId = (photo as any).parentReference?.id || ''
+
+  // Build the preview URL with context parameters
+  const params = new URLSearchParams()
+  params.set('fileId', fileId)
+  params.set('contextRouteName', 'files-spaces-generic')
+  params.set('contextRouteParams.driveAliasAndItem', driveAliasAndItem)
+  if (parentId) {
+    params.set('contextRouteQuery.fileId', parentId)
+  }
+
+  const previewUrl = `${serverUrl}/preview/${encodedFullPath}?${params.toString()}`
+  window.open(previewUrl, '_blank')
+}
+
+async function copyPhotoLink(photo: PhotoWithDate) {
+  const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
+  const fileId = (photo as any).fileId || photo.id || ''
+
+  // Use the short /f/{fileId} format
+  const shareUrl = `${serverUrl}/f/${encodeURIComponent(fileId)}`
+
+  try {
+    await navigator.clipboard.writeText(shareUrl)
+    alert('Link copied to clipboard!')
+  } catch (err) {
+    console.error('Failed to copy link:', err)
+    alert('Failed to copy link. Please try again.')
+  }
+}
+
+async function confirmAndDelete(photo: PhotoWithDate) {
+  const confirmed = confirm(`Are you sure you want to delete "${photo.name}"?\n\nThe file will be moved to the recycle bin.`)
+  if (!confirmed) return
+
+  try {
+    const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
+    const spaceId = personalSpace?.id || ''
+    const filePath = (photo as any).filePath || photo.name || ''
+    const encodedPath = filePath.split('/').map((s: string) => encodeURIComponent(s)).join('/')
+
+    await clientService.httpAuthenticated.delete(
+      `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
+    )
+
+    // Remove from local state
+    const photoKey = photo.id || (photo as any).fileId || photo.name
+    allPhotos.value = allPhotos.value.filter(p => {
+      const key = p.id || (p as any).fileId || p.name
+      return key !== photoKey
+    })
+    loadedPhotoIds.value.delete(photoKey)
+
+    // Clean up blob cache
+    if (blobUrlCache.has(photoKey)) {
+      const cachedUrl = blobUrlCache.get(photoKey)
+      if (cachedUrl && cachedUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(cachedUrl)
+      }
+      blobUrlCache.delete(photoKey)
+    }
+
+    // Handle lightbox state after deletion
+    if (currentGroupPhotos.value.length > 0) {
+      // Remove deleted photo from current group
+      const deletedIndex = currentGroupPhotos.value.findIndex(p => {
+        const key = p.id || (p as any).fileId || p.name
+        return key === photoKey
+      })
+
+      if (deletedIndex >= 0) {
+        currentGroupPhotos.value.splice(deletedIndex, 1)
+
+        if (currentGroupPhotos.value.length === 0) {
+          // No more photos in stack, close lightbox
+          closeLightbox()
+        } else {
+          // Adjust index and show next/prev photo
+          if (currentPhotoIndex.value >= currentGroupPhotos.value.length) {
+            currentPhotoIndex.value = currentGroupPhotos.value.length - 1
+          }
+          selectedPhoto.value = currentGroupPhotos.value[currentPhotoIndex.value]
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Failed to delete photo:', err)
+    alert('Failed to delete photo. Please try again.')
+  }
 }
 
 function injectStyles() {
@@ -1400,6 +1662,61 @@ function injectStyles() {
       color: var(--oc-color-text-default, #333);
       white-space: nowrap;
     }
+    /* Breadcrumb Navigation (DISABLED)
+    .breadcrumb-nav {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.5rem 0;
+      flex-wrap: wrap;
+      font-size: 0.875rem;
+    }
+    .breadcrumb-item {
+      background: none;
+      border: none;
+      color: var(--oc-color-swatch-primary-default, #0070c0);
+      cursor: pointer;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      transition: background 0.15s;
+      font-size: 0.875rem;
+    }
+    .breadcrumb-item:hover {
+      background: var(--oc-color-background-muted, #f0f0f0);
+    }
+    .breadcrumb-item.active {
+      color: var(--oc-color-text-default, #333);
+      font-weight: 600;
+      cursor: default;
+    }
+    .breadcrumb-item.active:hover {
+      background: none;
+    }
+    .breadcrumb-separator {
+      color: var(--oc-color-text-muted, #999);
+    }
+    .folder-filter-btn {
+      position: absolute;
+      top: 0.25rem;
+      left: 0.25rem;
+      background: rgba(0, 0, 0, 0.5);
+      border: none;
+      border-radius: 4px;
+      padding: 0.25rem 0.35rem;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s;
+      font-size: 0.75rem;
+      line-height: 1;
+      z-index: 5;
+    }
+    .folder-filter-btn:hover {
+      background: rgba(0, 0, 0, 0.7);
+    }
+    .photo-item:hover .folder-filter-btn {
+      opacity: 1;
+    }
+    */
     .photo-count, .loading-status {
       color: var(--oc-color-text-muted, #666);
       margin: 0;
@@ -1484,6 +1801,34 @@ function injectStyles() {
       pointer-events: none;
     }
     .photo-item:hover .photo-overlay { opacity: 1; }
+    /* Context menu button on photos */
+    .photo-menu-btn {
+      position: absolute;
+      top: 0.25rem;
+      right: 0.25rem;
+      width: 1.75rem;
+      height: 1.75rem;
+      border: none;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1.1rem;
+      font-weight: bold;
+      opacity: 0;
+      transition: opacity 0.2s, background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 5;
+      line-height: 1;
+    }
+    .photo-item:hover .photo-menu-btn {
+      opacity: 1;
+    }
+    .photo-menu-btn:hover {
+      background: rgba(0, 0, 0, 0.7);
+    }
     .photo-name {
       font-size: 0.75rem;
       white-space: nowrap;
@@ -1522,10 +1867,33 @@ function injectStyles() {
       max-width: 90vw;
       max-height: 90vh;
     }
-    .lightbox-close {
+    .lightbox-top-buttons {
       position: absolute;
       top: 0.5rem;
       right: 0.5rem;
+      display: flex;
+      gap: 0.5rem;
+      z-index: 10;
+    }
+    .lightbox-menu-btn {
+      width: 2.5rem;
+      height: 2.5rem;
+      border: none;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      font-size: 1.25rem;
+      font-weight: bold;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+    .lightbox-menu-btn:hover {
+      background: rgba(0, 0, 0, 0.7);
+    }
+    .lightbox-close {
       width: 2.5rem;
       height: 2.5rem;
       border: none;
@@ -1534,7 +1902,6 @@ function injectStyles() {
       font-size: 1.5rem;
       border-radius: 50%;
       cursor: pointer;
-      z-index: 10;
       display: flex;
       align-items: center;
       justify-content: center;
