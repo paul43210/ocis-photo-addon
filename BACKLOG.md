@@ -50,6 +50,18 @@
 - **Expected:** Preview maintains full image framing, just at lower resolution
 - **Actual:** Preview is center-cropped to fill requested dimensions
 
+### 🔴 BUG: HEIC Images Not Supported (Backend)
+- [ ] **Add HEIC/HEIF image format support to oCIS**
+- HEIC files (Apple's default photo format since iOS 11) do not display in oCIS
+- Neither thumbnails nor full images load - broken in both photo-addon AND core oCIS file browser
+- **Example file:** `IMG_20251013_174320.heic`
+- **Impact:** iPhone photos saved in HEIC format are completely unusable
+- **Requires:** Backend changes - likely needs HEIC codec/decoder in thumbnail service
+- **Possible solutions:**
+  - Add libheif support to oCIS thumbnail generation
+  - Server-side conversion to JPEG on upload
+  - Browser-side HEIC decoding (heic2any.js) as fallback
+
 ---
 
 ## Phase 2: UI/UX Improvements
