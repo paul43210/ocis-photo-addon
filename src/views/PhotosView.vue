@@ -139,13 +139,13 @@
       </div>
     </div>
 
-    <!-- Map View (placeholder) -->
+    <!-- Map View -->
     <div v-if="!error && viewType === 'map'" class="map-view-container">
-      <div class="map-placeholder">
-        <span class="map-icon">🗺️</span>
-        <h2>Map View</h2>
-        <p>Coming soon! Photos with GPS location data will be displayed on an interactive map.</p>
-      </div>
+      <PhotoMap
+        :photos="displayedPhotos"
+        :get-thumbnail-url="getPhotoUrl"
+        @photo-click="openPhotoFromMap"
+      />
     </div>
 
     <!-- Photo Lightbox with navigation -->
@@ -184,6 +184,7 @@ import { Resource, SpaceResource } from '@ownclouders/web-client'
 import PhotoLightbox from '../components/PhotoLightbox.vue'
 import PhotoStack from '../components/PhotoStack.vue'
 import PhotoContextMenu from '../components/PhotoContextMenu.vue'
+import PhotoMap from '../components/PhotoMap.vue'
 
 // Types for Graph API response
 interface GeoCoordinates {
@@ -1521,6 +1522,11 @@ function openStack(subGroup: PhotoSubGroup) {
   if (subGroup.photos.length > 0) {
     openPhoto(subGroup.photos[0], subGroup.photos)
   }
+}
+
+function openPhotoFromMap(photo: PhotoWithDate) {
+  // Open single photo from map view (no group navigation)
+  openPhoto(photo)
 }
 
 function navigatePhoto(direction: 'prev' | 'next') {

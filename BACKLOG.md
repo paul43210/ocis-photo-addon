@@ -62,6 +62,22 @@
   - Server-side conversion to JPEG on upload
   - Browser-side HEIC decoding (heic2any.js) as fallback
 
+### 🔴 BUG: GPS Coordinates Not Returned by WebDAV Search (Backend)
+- [ ] **Expose photo location (lat/lon) in WebDAV search results**
+- Map view frontend is complete but shows no photos - GPS data not in API response
+- WebDAV search requests `oc:photo-location-latitude` and `oc:photo-location-longitude` but they're not returned
+- **Impact:** Map view is non-functional until this is fixed
+- **Requires:** Backend investigation/changes
+- **Possible causes:**
+  1. Tika may not be extracting GPS data from EXIF (try reindexing)
+  2. oCIS config may not expose location metadata in search results
+  3. Location fields may not have `Store=true` in Bleve index (like previous photo fields bug)
+  4. May need to use Graph API instead of WebDAV search for location data
+- **Debug steps:**
+  - Check if GPS data exists in Bleve index
+  - Verify Tika is extracting GPS coordinates
+  - Check `services/webdav/pkg/service/v0/search.go` for location property mapping
+
 ---
 
 ## Phase 2: UI/UX Improvements
@@ -136,17 +152,14 @@
 ## Phase 4: Map View
 
 ### 🟡 Map Integration
-- [ ] Map view showing photo locations (GPS)
-- [ ] Cluster markers for nearby photos
-- [ ] Dynamic clustering based on zoom level
-- [ ] Click marker to open photo in lightbox
-- [ ] Click cluster to zoom in
+- [x] Map view UI with Leaflet.js + OpenStreetMap (frontend complete)
+- [x] Cluster markers for nearby photos
+- [x] Click marker to open photo in lightbox
+- [x] Click cluster to zoom in
+- [ ] **BLOCKED:** Waiting on GPS data from backend (see bug above)
 - [ ] "View on Map" from individual photo (exists in lightbox)
 - [ ] Search for all files within visible map bounds (future)
 - **Prompt:** `prompt-map-view.md`
-
-### Map Library
-- Leaflet.js + OpenStreetMap (open source, no API key, free)
 
 ---
 
@@ -246,3 +259,4 @@
 - [x] UI cleanup: Removed MDATE indicator icon
 - [x] Lightbox: Display photo folder path
 - [x] Context menu: Download, Open in Files, Copy Link, Delete
+- [x] Map view: Frontend UI with Leaflet.js (blocked on backend GPS data)
