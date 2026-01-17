@@ -13,6 +13,14 @@
 
 ## 🚨 Critical Bugs
 
+### 🟡 BUG: Intermittent First Load Failure
+- [ ] **First load sometimes fails with "Failed to search photos" error**
+- Second load/refresh works fine
+- Suspected race condition or initialization timing issue
+- May be related to oCIS service startup, authentication, or space discovery
+- **Repro:** Hard refresh the page, sometimes first load fails
+- **Workaround:** Refresh the page again
+
 ### 🔴 BUG: HEIC Images Not Supported (Backend)
 - [ ] **Add HEIC/HEIF image format support to oCIS**
 - HEIC files (Apple's default photo format since iOS 11) do not display in oCIS
