@@ -34,6 +34,7 @@
 - [x] Initial review received from @kobergj (Jan 16, 2026)
 - [x] Linter fix applied (commit 7500db70)
 - [x] Replied to maintainer's question about map lookup logic
+- [x] SonarCloud cognitive complexity fix (commit 9404bb14)
 - [ ] **PENDING:** Await final approval and merge
 - **Branch:** `feature/photo-metadata-search`
 - **Changes:** Bleve index photo fields, KQL query support, WebDAV properties
@@ -153,6 +154,11 @@
 - [ ] Performance optimization for large libraries (10k+ photos)
 - [ ] Accessibility audit (keyboard navigation, screen readers)
 - [ ] i18n/localization support
+- [ ] **Code complexity audit** - Review functions for cognitive complexity (target: <15 per function)
+  - Run ESLint complexity rules (`complexity`, `max-depth`, `max-nested-callbacks`)
+  - Review large components: `PhotosView.vue`, `PhotoLightbox.vue`, `usePhotos.ts`
+  - Extract helper functions from deeply nested conditionals
+  - Align with SonarQube standards before upstream contribution
 
 ---
 
@@ -165,6 +171,7 @@
 - [x] GPS coordinates exposed in WebDAV search results
 - [x] PR #11912 submitted to upstream
 - [x] Linter fix (commit 7500db70) - moved comment for formatting
+- [x] Cognitive complexity refactor (commit 9404bb14) - extracted appendPhotoProps/appendLocationProps
 - [x] Thumbnail cropping fix (aspect ratio preserved)
 
 ### Frontend (Photo-Addon)
