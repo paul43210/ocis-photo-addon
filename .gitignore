@@ -37,3 +37,8 @@ CLAUDE.md
 # Claude
 .claude/
 scripts/
+
+# Playwright
+playwright-report/
+test-results/
+tests/e2e/.auth/user.json

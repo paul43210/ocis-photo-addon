@@ -158,7 +158,7 @@
 ## Technical Debt
 
 - [x] Add unit tests for new components (48 tests in usePhotos.spec.ts)
-- [ ] Add e2e tests for critical flows
+- [x] Add E2E tests framework (Playwright) with tests for gallery, lightbox, map view
 - [ ] Performance optimization for large libraries (10k+ photos)
 - [ ] Accessibility audit (keyboard navigation, screen readers)
 - [x] i18n/localization support (useI18n composable with EN, DE, FR translations)
