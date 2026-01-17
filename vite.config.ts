@@ -1,9 +1,15 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
 export default defineConfig({
   plugins: [vue()],
+  test: {
+    // Only run unit tests, not e2e tests
+    include: ['tests/unit/**/*.spec.ts'],
+    exclude: ['tests/e2e/**/*'],
+  },
   build: {
     lib: {
       entry: resolve(__dirname, 'src/index.ts'),
