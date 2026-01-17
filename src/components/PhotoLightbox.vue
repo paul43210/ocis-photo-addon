@@ -105,10 +105,15 @@
         <!-- EXIF Metadata section -->
         <div class="lightbox-metadata">
           <div class="metadata-grid">
-            <!-- EXIF: Date Taken -->
-            <div v-if="exifData.takenDateTime" class="metadata-item">
+            <!-- Date Taken (with source indicator) -->
+            <div v-if="displayDate" class="metadata-item">
               <span class="metadata-label">Date Taken</span>
-              <span class="metadata-value">{{ formatExifDate(exifData.takenDateTime) }}</span>
+              <span class="metadata-value date-with-source">
+                {{ displayDate }}
+                <span :class="['date-source-badge', isExifDate ? 'badge-exif' : 'badge-upload']">
+                  {{ isExifDate ? '(EXIF)' : '(Mod time)' }}
+                </span>
+              </span>
             </div>
 
             <!-- EXIF: Camera -->
@@ -180,14 +185,6 @@
               <span class="metadata-label">Type</span>
               <span class="metadata-value">{{ photo.mimeType }}</span>
             </div>
-
-            <!-- Date source indicator -->
-            <div v-if="photoWithDate?.dateSource" class="metadata-item">
-              <span class="metadata-label">Date Source</span>
-              <span class="metadata-value" :class="{ 'exif-source': photoWithDate.dateSource !== 'lastModifiedDateTime' }">
-                {{ photoWithDate.dateSource }}
-              </span>
-            </div>
           </div>
         </div>
       </div>
@@ -222,6 +219,8 @@ interface GraphPhoto {
 interface PhotoWithDate extends Resource {
   graphPhoto?: GraphPhoto
   dateSource?: string
+  timestamp?: number
+  filePath?: string
 }
 
 const props = withDefaults(defineProps<{
@@ -351,6 +350,29 @@ const downloadUrl = computed(() => fullSizeUrl.value || thumbnailUrl.value)
 // Extract EXIF data from graphPhoto
 const exifData = computed<GraphPhoto>(() => {
   return photoWithDate.value?.graphPhoto || {}
+})
+
+// Check if date comes from EXIF data
+const isExifDate = computed(() => {
+  return photoWithDate.value?.dateSource === 'photo.takenDateTime'
+})
+
+// Get display date - prefer EXIF takenDateTime, fallback to timestamp
+const displayDate = computed(() => {
+  const p = photoWithDate.value
+  if (!p) return ''
+
+  // If we have EXIF takenDateTime, use it
+  if (p.graphPhoto?.takenDateTime) {
+    return formatExifDate(p.graphPhoto.takenDateTime)
+  }
+
+  // Fallback to timestamp (from lastModifiedDateTime)
+  if (p.timestamp) {
+    return formatExifDate(new Date(p.timestamp).toISOString())
+  }
+
+  return ''
 })
 
 // Navigation computed
@@ -1165,9 +1187,30 @@ function getMapUrl(lat: number, lon: number): string {
   color: var(--oc-color-text-default, #333);
 }
 
-.metadata-value.exif-source {
+.metadata-value.date-with-source {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.date-source-badge {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.badge-exif {
+  background: var(--oc-color-swatch-success-muted, #e6f4e6);
   color: var(--oc-color-swatch-success-default, #2a7b2a);
-  font-weight: 500;
+}
+
+.badge-upload {
+  background: var(--oc-color-background-highlight, #f0f0f0);
+  color: var(--oc-color-text-muted, #666);
 }
 
 .metadata-location {

@@ -56,7 +56,6 @@ export interface TranslationKeys {
   'metadata.altitude': string
   'metadata.fileSize': string
   'metadata.type': string
-  'metadata.dateSource': string
 
   // Orientation labels
   'orientation.normal': string
@@ -160,7 +159,6 @@ const en: TranslationKeys = {
   'metadata.altitude': 'Altitude',
   'metadata.fileSize': 'File Size',
   'metadata.type': 'Type',
-  'metadata.dateSource': 'Date Source',
 
   // Orientation labels
   'orientation.normal': 'Normal',

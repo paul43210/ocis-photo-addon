@@ -1,6 +1,6 @@
 # oCIS Photo Add-on - Backlog
 
-**Last Updated:** January 17, 2026
+**Last Updated:** January 18, 2026
 
 ---
 
@@ -59,10 +59,10 @@
 
 ## Phase 2: UI/UX Improvements
 
-### 🟡 Lightbox Date Display Cleanup
-- [ ] Replace "Date Source: photo.takenDateTime" with simpler "Date Taken" label
-- [ ] Add small indicator beside date: "EXIF" (if from photo.takenDateTime) or "Up" (if from upload/mtime)
-- [ ] Cleaner, less technical presentation for end users
+### ✅ Lightbox Date Display Cleanup (Complete)
+- [x] Replace "Date Source: photo.takenDateTime" with simpler "Date Taken" label
+- [x] Add small indicator badge beside date: "(EXIF)" (green) or "(Mod time)" (gray)
+- [x] Cleaner, less technical presentation for end users
 
 ---
 
@@ -204,6 +204,7 @@
 - [x] "Open in Files" link in lightbox
 - [x] Pinch-to-zoom calendar groupings (Day/Week/Month/Year views)
 - [x] GPS-based stack merging (location + time grouping)
+- [x] Lightbox: Simplified date display with EXIF/Upload source badge
 
 ### Performance Optimizations (Jan 2026)
 - [x] Reduced thumbnail data transfer by 95% (25.8MB → 1.4MB)
