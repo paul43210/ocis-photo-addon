@@ -1,6 +1,6 @@
 # oCIS Photo Add-on - Backlog
 
-**Last Updated:** January 15, 2026
+**Last Updated:** January 17, 2026
 
 ---
 
@@ -12,43 +12,6 @@
 ---
 
 ## 🚨 Critical Bugs
-
-### 🔴 BUG: Frontend Not Using Search API
-- [x] **Replace folder traversal with WebDAV Search API**
-- Currently makes 82 sequential `/children` API calls (~4 seconds)
-- Should make 1 REPORT request to `/dav/spaces/{spaceId}` (~0.5 seconds)
-- Backend search index is ready (Phase 1 complete), frontend never integrated
-- **Impact:** Initial load takes ~6 seconds instead of ~2 seconds
-- **Prompt:** `prompt-use-search-api.md`
-
-### 🔴 BUG: Search Returns ALL Photos (No Date Filter)
-- [x] **Add KQL date filter to search query**
-- Currently pattern=`*` returns all 5251 photos (5.5MB, 4s wait)
-- Should use `photo.takenDateTime:[3-months-ago TO today]`
-- Initial load should fetch 3 months (2 visible + 1 buffer)
-- Progressive loading for older photos on scroll
-- **Impact:** 4s wait → 0.5s wait
-- **Prompt:** `prompt-date-filtered-search.md`
-
-### 🔴 BUG: EXIF Toggle No Longer Functions
-- [x] **Update search query to respect EXIF toggle state**
-- After switching from folder crawling to Search API, the "EXIF only" toggle no longer filters results
-- **When EXIF toggle ON:** Query should filter by `photo.takenDateTime` (only photos with EXIF capture date)
-- **When EXIF toggle OFF:** Query should use file `mtime` (modification time) to include all images
-- Currently search always uses `photo.takenDateTime`, ignoring toggle state
-- **Impact:** Users cannot view photos without EXIF data
-- **Prompt:** `prompt-fix-exif-toggle.md`
-
-### 🔴 BUG: oCIS Thumbnails Are Cropped (Backend)
-- [ ] **Fix oCIS preview endpoint to respect aspect ratio**
-- The `?preview=1&x=W&y=H&a=1` parameter should preserve aspect ratio but oCIS crops to fill
-- Even when requesting exact image dimensions (e.g., `x=653&y=868` for a 653x868 image), the preview is cropped
-- **Impact:** Lightbox shows jarring "zoom out" effect when full image replaces thumbnail
-- **Requires:** Backend changes to oCIS fork (not frontend)
-- **Repository:** `github.com/paul43210/ocis` (`feature/photo-metadata-search` branch)
-- **Test URL:** `https://cloud.faure.ca/dav/spaces/{spaceId}/path/to/photo.jpg?preview=1&x=653&y=868&a=1`
-- **Expected:** Preview maintains full image framing, just at lower resolution
-- **Actual:** Preview is center-cropped to fill requested dimensions
 
 ### 🔴 BUG: HEIC Images Not Supported (Backend)
 - [ ] **Add HEIC/HEIF image format support to oCIS**
@@ -62,63 +25,42 @@
   - Server-side conversion to JPEG on upload
   - Browser-side HEIC decoding (heic2any.js) as fallback
 
-### 🔴 BUG: GPS Coordinates Not Returned by WebDAV Search (Backend)
-- [ ] **Expose photo location (lat/lon) in WebDAV search results**
-- Map view frontend is complete but shows no photos - GPS data not in API response
-- WebDAV search requests `oc:photo-location-latitude` and `oc:photo-location-longitude` but they're not returned
-- **Impact:** Map view is non-functional until this is fixed
-- **Requires:** Backend investigation/changes
-- **Possible causes:**
-  1. Tika may not be extracting GPS data from EXIF (try reindexing)
-  2. oCIS config may not expose location metadata in search results
-  3. Location fields may not have `Store=true` in Bleve index (like previous photo fields bug)
-  4. May need to use Graph API instead of WebDAV search for location data
-- **Debug steps:**
-  - Check if GPS data exists in Bleve index
-  - Verify Tika is extracting GPS coordinates
-  - Check `services/webdav/pkg/service/v0/search.go` for location property mapping
+---
+
+## Upstream Contribution Status
+
+### 🔴 Backend PR #11912 - Photo EXIF Metadata Search
+- [x] PR submitted: https://github.com/owncloud/ocis/pull/11912
+- [x] Initial review received from @kobergj (Jan 16, 2026)
+- [x] Linter fix applied (commit 7500db70)
+- [x] Replied to maintainer's question about map lookup logic
+- [ ] **PENDING:** Await final approval and merge
+- **Branch:** `feature/photo-metadata-search`
+- **Changes:** Bleve index photo fields, KQL query support, WebDAV properties
+
+### 🟡 Web Extensions Contribution
+- [x] Draft proposal created for `owncloud/web-extensions` repo
+- [x] Submitted issue to web-extensions repo proposing photo-addon and advanced-search
+- [ ] Wait for maintainer feedback on interest/naming/scope
+- [ ] Fork and restructure to `web-app-photos` and `web-app-advanced-search`
+- [ ] Update license from Apache-2.0 to AGPL-3.0
+- [ ] Submit PRs after backend PR merges
 
 ---
 
 ## Phase 2: UI/UX Improvements
 
-### 🔴 Stack View Fixes
-- [x] Fix left/right arrow positioning (currently too low)
-- [x] Enable swipe gestures for navigation
-- [x] Improve touch responsiveness
-
-### 🔴 Remove Icon Clutter
-- [x] Remove "EXIF" indicator icon
-- [x] Remove "MDATE" indicator icon
-- [🟡] Cleaner, more minimal interface
-
-### 🟡 Calendar View (Pinch-to-Zoom Groupings)
-- [ ] Implement pinch gesture recognition
-- [ ] Day view (current default)
-- [ ] Week view (pinch out)
-- [ ] Month view (pinch out further)
-- [ ] Year view (maximum zoom out)
-- [🟢] Smooth transitions between zoom levels
-- **Prompt:** `prompt-pinch-zoom.md`
-
-### 🟡 File Navigation
-- [x] Display the path to the photo in lightbox/details
-- [🟡] Add "Open in Files" link to navigate to file location in standard oCIS view
-- [~] Breadcrumb navigation in photo view (implemented, commented out - revisit later)
-- **Prompt (lightbox path):** `prompt-lightbox-path.md`
-- **Prompt (breadcrumb):** `prompt-breadcrumb-nav.md`
+### 🟡 Lightbox Date Display Cleanup
+- [ ] Replace "Date Source: photo.takenDateTime" with simpler "Date Taken" label
+- [ ] Add small indicator beside date: "EXIF" (if from photo.takenDateTime) or "Up" (if from upload/mtime)
+- [ ] Cleaner, less technical presentation for end users
 
 ---
 
 ## Phase 2: Stack & Grouping Logic
 
-### 🟡 Improved Stack Merging
-- [🟡] Use GPS coordinates (lat/lon) for smarter grouping
-- [ ] Group photos taken at same location within time window
-- [ ] Configurable distance threshold for location-based grouping
-
 ### 🟡 Stack Cover Selection
-- [🟢] Integrate with PhotoPrism image quality scoring
+- [ ] Integrate with PhotoPrism image quality scoring
 - [ ] Use highest quality image as stack "face"
 - [ ] Fallback to most recent if no quality data
 
@@ -126,23 +68,13 @@
 
 ## Phase 3: Photo Actions & Context Menu
 
-### 🔴 Context Menu ("⋮" Three Dots)
-- [x] Download original
-- [x] Open in Files
-- [x] Copy link to clipboard
-- [x] Delete (with confirmation)
-- [🟢] Rename photo (future)
-- [🟢] Move to folder (future)
-- [🟢] Copy to folder (future)
-- **Prompt:** `prompt-context-menu.md`
-
 ### 🟡 Share Button
-- [🟢] Quick share button in lightbox view
+- [ ] Quick share button in lightbox view
 - [ ] Copy link to clipboard
 - [ ] Share via oCIS sharing dialog
 
 ### 🟡 Tagging in Lightbox
-- [🟢] View existing tags in popup
+- [ ] View existing tags in popup
 - [ ] Add new tags directly
 - [ ] Remove tags
 - [ ] Tag autocomplete from existing tags
@@ -151,27 +83,27 @@
 
 ## Phase 4: Map View
 
-### 🟡 Map Integration
-- [x] Map view UI with Leaflet.js + OpenStreetMap (frontend complete)
+### ✅ Map Integration (Complete)
+- [x] Map view UI with Leaflet.js + OpenStreetMap
 - [x] Cluster markers for nearby photos
 - [x] Click marker to open photo in lightbox
 - [x] Click cluster to zoom in
-- [ ] **BLOCKED:** Waiting on GPS data from backend (see bug above)
-- [ ] "View on Map" from individual photo (exists in lightbox)
-- [ ] Search for all files within visible map bounds (future)
-- **Prompt:** `prompt-map-view.md`
+- [x] GPS coordinates returned by backend
+- [x] Map tile gap CSS fix
+- [x] "View on Map" from individual photo
+- [ ] Search for all files within visible map bounds (future enhancement)
 
 ---
 
 ## Phase 5: PhotoPrism Integration
 
-### 🟡 Face Recognition
+### 🟢 Face Recognition
 - [ ] Connect to PhotoPrism API for face detection
 - [ ] Inject person tags into oCIS metadata
 - [ ] Face-based photo grouping/filtering
 - [ ] "People" view showing faces with photo counts
 
-### 🟡 AI Quality Scoring
+### 🟢 AI Quality Scoring
 - [ ] Retrieve image quality scores from PhotoPrism
 - [ ] Use for stack cover selection
 - [ ] Filter/sort by quality
@@ -214,20 +146,6 @@
 
 ---
 
-## Community & Upstream
-
-### 🟢 Contribution Goals
-- [ ] Submit backend PR to upstream oCIS (photo metadata search)
-- [ ] Submit photo-addon to awesome-ocis directory
-- [ ] Write blog post / documentation for community
-- [ ] Gather community feedback on priorities
-
-### PR Status
-- **Backend PR:** https://github.com/owncloud/ocis/compare/master...paul43210:ocis:feature/photo-metadata-search
-- **Status:** Ready for review (not yet submitted)
-
----
-
 ## Technical Debt
 
 - [ ] Add unit tests for new components
@@ -240,18 +158,25 @@
 
 ## Completed ✅
 
+### Backend (oCIS Fork)
+- [x] Photo metadata in Bleve search index with `Store=true`
+- [x] KQL photo field queries (cameraMake, cameraModel, takenDateTime, etc.)
+- [x] WebDAV `oc:photo-*` properties in search results
+- [x] GPS coordinates exposed in WebDAV search results
+- [x] PR #11912 submitted to upstream
+- [x] Linter fix (commit 7500db70) - moved comment for formatting
+- [x] Thumbnail cropping fix (aspect ratio preserved)
+
+### Frontend (Photo-Addon)
 - [x] Basic photo grid view
 - [x] Date grouping by EXIF capture date
 - [x] Infinite scroll (backwards in time)
 - [x] Lightbox viewer with EXIF panel
 - [x] Camera info display (make, model, aperture, ISO, etc.)
 - [x] GPS coordinates with "View on Map" link
-- [x] Backend: Photo metadata in Bleve search index
-- [x] Backend: KQL photo field queries
-- [x] Backend: WebDAV oc:photo-* properties
-- [x] Frontend: WebDAV Search API integration
-- [x] Frontend: Date-filtered search queries
-- [x] Frontend: EXIF toggle respects search query mode
+- [x] WebDAV Search API integration (replaced folder traversal)
+- [x] Date-filtered search queries (3-month initial load)
+- [x] EXIF toggle respects search query mode
 - [x] Stack view: Arrow positioning fixed
 - [x] Stack view: Swipe gesture navigation
 - [x] Stack view: Touch responsiveness improvements
@@ -259,4 +184,18 @@
 - [x] UI cleanup: Removed MDATE indicator icon
 - [x] Lightbox: Display photo folder path
 - [x] Context menu: Download, Open in Files, Copy Link, Delete
-- [x] Map view: Frontend UI with Leaflet.js (blocked on backend GPS data)
+- [x] Map view: Full implementation with Leaflet.js
+- [x] Map view: Tile gap CSS fix
+- [x] Header bar z-index fix
+- [x] "Open in Files" link in lightbox
+- [x] Pinch-to-zoom calendar groupings (Day/Week/Month/Year views)
+- [x] GPS-based stack merging (location + time grouping)
+
+### Performance Optimizations (Jan 2026)
+- [x] Reduced thumbnail data transfer by 95% (25.8MB → 1.4MB)
+- [x] Improved search response time by 83% (4s → 126ms)
+- [x] Decreased total XHR data by 93%
+- [x] Initial load now fetches 3 months instead of all 5,000+ photos
+
+### Community
+- [x] Web-extensions proposal submitted to owncloud/web-extensions
