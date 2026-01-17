@@ -3,7 +3,8 @@ import { test, expect } from './fixtures'
 test.describe('Photo Lightbox', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/files/spaces/personal/home')
-    await page.waitForLoadState('networkidle')
+    await page.waitForLoadState('domcontentloaded')
+    await page.waitForTimeout(3000) // Wait for Vue app to hydrate
   })
 
   test('should open lightbox when clicking a photo', async ({ page }) => {
