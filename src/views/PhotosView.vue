@@ -10,10 +10,10 @@
   >
     <div class="photos-header">
       <div class="header-top">
-        <h1>Photos ({{ photoCount }})</h1>
+        <h1>Photos ({{ viewType === 'map' ? `${mapVisibleCount} of ${mapTotalCount} in view` : photoCount }})</h1>
         <div class="header-controls">
-          <!-- Date filter -->
-          <div class="date-filter">
+          <!-- Date filter (hidden in map view) -->
+          <div v-if="viewType !== 'map'" class="date-filter">
             <span class="control-label">Jump to:</span>
             <select v-model="filterYear" @change="onDateFilterChange" class="date-select">
               <option v-for="year in availableYears" :key="year" :value="year">{{ year }}</option>
@@ -40,8 +40,8 @@
               Map
             </button>
           </div>
-          <!-- EXIF only toggle -->
-          <label class="exif-toggle">
+          <!-- EXIF only toggle (hidden in map view) -->
+          <label v-if="viewType !== 'map'" class="exif-toggle">
             <input type="checkbox" v-model="exifOnly" />
             <span class="toggle-label">EXIF only</span>
           </label>
@@ -75,7 +75,7 @@
         Loading {{ currentDateRange }}... {{ photoCount }} photos
       </p>
       <p v-else-if="error" class="error">{{ error }}</p>
-      <p v-else class="photo-count">
+      <p v-else-if="viewType !== 'map'" class="photo-count">
         <span v-if="isFullyLoaded" class="complete-hint">All photos loaded</span>
       </p>
     </div>
@@ -142,9 +142,10 @@
     <!-- Map View -->
     <div v-if="!error && viewType === 'map'" class="map-view-container">
       <PhotoMap
-        :photos="displayedPhotos"
+        :photos="mapPhotos"
         :get-thumbnail-url="getPhotoUrl"
         @photo-click="openPhotoFromMap"
+        @visible-count-change="onMapVisibleCountChange"
       />
     </div>
 
@@ -351,8 +352,9 @@ function zoomOut() {
   }
 }
 
-// Pinch gesture handlers
+// Pinch gesture handlers (calendar view only)
 function handlePinchStart(event: TouchEvent) {
+  if (viewType.value !== 'calendar') return
   if (event.touches.length === 2) {
     isPinching = true
     initialPinchDistance = getTouchDistance(event.touches)
@@ -360,30 +362,35 @@ function handlePinchStart(event: TouchEvent) {
 }
 
 function handlePinchMove(event: TouchEvent) {
+  if (viewType.value !== 'calendar') return
   if (!isPinching || event.touches.length !== 2) return
 
   const currentDistance = getTouchDistance(event.touches)
   const ratio = currentDistance / initialPinchDistance
 
   // Change zoom at specific thresholds (continuous pinch)
+  // Pinch (fingers together, ratio < 1) = zoom out (less detail: day -> year)
+  // Spread (fingers apart, ratio > 1) = zoom in (more detail: year -> day)
   if (ratio < 0.6) {
-    zoomIn()
+    zoomOut()
     initialPinchDistance = currentDistance // Reset baseline
   } else if (ratio > 1.6) {
-    zoomOut()
+    zoomIn()
     initialPinchDistance = currentDistance // Reset baseline
   }
 }
 
 function handlePinchEnd(event: TouchEvent) {
+  if (viewType.value !== 'calendar') return
   if (isPinching && event.touches.length < 2) {
     isPinching = false
     initialPinchDistance = 0
   }
 }
 
-// Desktop: Ctrl+scroll wheel to zoom
+// Desktop: Ctrl+scroll wheel to zoom (calendar view only)
 function handleWheel(event: WheelEvent) {
+  if (viewType.value !== 'calendar') return
   if (event.ctrlKey) {
     event.preventDefault()
     if (event.deltaY > 0) {
@@ -397,6 +404,11 @@ function handleWheel(event: WheelEvent) {
 // Refs
 const scrollContainer = ref<HTMLElement | null>(null)
 const allPhotos = ref<PhotoWithDate[]>([])
+const mapPhotos = ref<PhotoWithDate[]>([])  // Separate data for map view (all photos with GPS)
+const mapPhotosLoaded = ref(false)  // Track if map photos have been fetched
+const mapVisibleCount = ref(0)  // Photos visible in current map viewport
+const mapTotalCount = ref(0)  // Total photos with GPS
+const thumbnailVersion = ref(0)  // Tracks thumbnail updates for efficient reactivity
 const loading = ref(true)
 const loadingMore = ref(false)
 const error = ref<string | null>(null)
@@ -1218,6 +1230,109 @@ async function fetchAllImagesViaSearch(driveId: string): Promise<PhotoWithDate[]
   }
 }
 
+/**
+ * Fetch all photos with GPS coordinates for map view
+ * Fetches all images and filters client-side for those with lat/lon
+ */
+async function fetchPhotosWithGPS(driveId: string): Promise<PhotoWithDate[]> {
+  const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
+  const spaceId = driveId
+
+  // Fetch all images - we'll filter for GPS client-side
+  // KQL doesn't support filtering by location existence reliably
+  const pattern = `mediatype:image*`
+
+  const searchBody = `<?xml version="1.0" encoding="UTF-8"?>
+<oc:search-files xmlns:oc="http://owncloud.org/ns" xmlns:d="DAV:">
+  <oc:search>
+    <oc:pattern>${pattern}</oc:pattern>
+    <oc:limit>10000</oc:limit>
+  </oc:search>
+  <d:prop>
+    <d:displayname/>
+    <d:getcontenttype/>
+    <d:getcontentlength/>
+    <d:getlastmodified/>
+    <oc:fileid/>
+    <oc:photo-taken-date-time/>
+    <oc:photo-camera-make/>
+    <oc:photo-camera-model/>
+    <oc:photo-f-number/>
+    <oc:photo-focal-length/>
+    <oc:photo-iso/>
+    <oc:photo-orientation/>
+    <oc:photo-exposure-numerator/>
+    <oc:photo-exposure-denominator/>
+    <oc:photo-location-latitude/>
+    <oc:photo-location-longitude/>
+    <oc:photo-location-altitude/>
+  </d:prop>
+</oc:search-files>`
+
+  console.log('[Map] Fetching all photos with GPS data')
+
+  try {
+    const response = await clientService.httpAuthenticated.request({
+      method: 'REPORT',
+      url: `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}`,
+      headers: {
+        'Content-Type': 'application/xml'
+      },
+      data: searchBody
+    })
+
+    const xmlText = typeof response.data === 'string' ? response.data : new XMLSerializer().serializeToString(response.data)
+    const allPhotos = parseSearchResponse(xmlText, spaceId)
+
+    // Filter to only photos with GPS coordinates
+    const photosWithGPS = allPhotos.filter(photo => {
+      const loc = photo.graphPhoto?.location
+      return loc?.latitude != null && loc?.longitude != null
+    })
+
+    console.log('[Map] Found', photosWithGPS.length, 'photos with GPS out of', allPhotos.length, 'total')
+    return photosWithGPS
+  } catch (err: any) {
+    console.error('[Map] Failed to fetch photos with GPS:', err)
+    throw new Error('Failed to load map photos. Please try again.')
+  }
+}
+
+/**
+ * Load photos for the map view
+ */
+async function loadMapPhotos() {
+  console.log('[Map] loadMapPhotos called, already loaded:', mapPhotosLoaded.value)
+  if (mapPhotosLoaded.value) return  // Already loaded
+
+  // Find personal space (same pattern as loadPhotos)
+  if (!personalSpace) {
+    const spaces = spacesStore.spaces
+    personalSpace = spaces.find((s: SpaceResource) => s.driveType === 'personal') || null
+  }
+
+  console.log('[Map] Got personal space:', personalSpace?.id)
+  if (!personalSpace) {
+    error.value = 'Could not find personal space'
+    return
+  }
+
+  try {
+    loading.value = true
+    console.log('[Map] Fetching photos with GPS...')
+    const photos = await fetchPhotosWithGPS(personalSpace.id)
+    console.log('[Map] Got', photos.length, 'photos with GPS')
+    mapPhotos.value = photos
+    mapPhotosLoaded.value = true
+    // Note: Pre-fetching happens in PhotoMap after clustering determines representative photos
+  } catch (err: any) {
+    console.error('[Map] Error loading map photos:', err)
+    error.value = err.message || 'Failed to load map photos'
+  } finally {
+    loading.value = false
+  }
+}
+
 // Track loaded date ranges to avoid duplicate fetches
 const loadedRanges = ref<Array<{ start: string, end: string }>>([])
 
@@ -1408,6 +1523,9 @@ const fetchQueue: Array<{ photo: PhotoWithDate, cacheKey: string }> = []
 const pendingFetches = new Set<string>()
 
 function getPhotoUrl(photo: Resource): string {
+  // Force Vue to track this dependency for reactivity updates
+  const _ = thumbnailVersion.value
+
   const p = photo as PhotoWithDate
 
   // Check if we already have a blob URL cached
@@ -1483,21 +1601,15 @@ async function doFetch(photo: PhotoWithDate, cacheKey: string) {
     const blobUrl = URL.createObjectURL(blob)
     blobUrlCache.set(cacheKey, blobUrl)
 
-    // Trigger reactivity update
-    const index = allPhotos.value.findIndex(p => (p.id || p.fileId || p.name) === cacheKey)
-    if (index >= 0) {
-      allPhotos.value = [...allPhotos.value]
-    }
+    // Trigger reactivity update efficiently (don't recreate array!)
+    thumbnailVersion.value++
   } catch (err) {
     // Cache a nice placeholder showing file type
     const filename = photo.name || photoPath.split('/').pop() || 'unknown'
     blobUrlCache.set(cacheKey, createPlaceholderSvg(filename))
 
-    // Trigger reactivity update for placeholder
-    const index = allPhotos.value.findIndex(p => (p.id || p.fileId || p.name) === cacheKey)
-    if (index >= 0) {
-      allPhotos.value = [...allPhotos.value]
-    }
+    // Trigger reactivity update efficiently
+    thumbnailVersion.value++
   }
 }
 
@@ -1524,9 +1636,14 @@ function openStack(subGroup: PhotoSubGroup) {
   }
 }
 
-function openPhotoFromMap(photo: PhotoWithDate) {
-  // Open single photo from map view (no group navigation)
-  openPhoto(photo)
+function openPhotoFromMap(photo: PhotoWithDate, groupPhotos?: PhotoWithDate[]) {
+  // Open photo from map view with optional group navigation
+  openPhoto(photo, groupPhotos)
+}
+
+function onMapVisibleCountChange(visibleCount: number, totalCount: number) {
+  mapVisibleCount.value = visibleCount
+  mapTotalCount.value = totalCount
 }
 
 function navigatePhoto(direction: 'prev' | 'next') {
@@ -1769,7 +1886,7 @@ function injectStyles() {
       position: sticky;
       top: 0;
       background: var(--oc-color-background-default, #fff);
-      z-index: 10;
+      z-index: 4; /* Lower than #oc-topbar's z-index of 5 */
       padding: 1rem 0 0.5rem 0;
       margin-left: -1.5rem;
       margin-right: -1.5rem;
@@ -2404,13 +2521,23 @@ function injectStyles() {
       opacity: 0;
     }
 
-    /* Map view placeholder */
+    /* Map view container */
     .map-view-container {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      width: 100%;
+      flex: 1 1 auto;
       min-height: 400px;
-      padding: 2rem;
+      height: calc(100vh - 200px); /* Fallback: viewport minus header/controls */
+      touch-action: none;
+      overflow: hidden;
+    }
+    /* When map is shown, make photos-app a flex column to let map fill space */
+    .photos-app:has(.map-view-container) {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden; /* Prevent scroll when map is shown */
+    }
+    .photos-app:has(.map-view-container) .photos-header {
+      flex-shrink: 0;
     }
     .map-placeholder {
       text-align: center;
@@ -2459,14 +2586,22 @@ watch(exifOnly, (newVal) => {
 })
 
 watch(viewType, (newVal) => {
+  console.log('[ViewType] Changed to:', newVal)
   try {
     localStorage.setItem(STORAGE_KEY_VIEW_TYPE, newVal)
   } catch (e) {
     // ignore
   }
-})
+
+  // Load map photos when switching to map view
+  if (newVal === 'map') {
+    console.log('[ViewType] Triggering loadMapPhotos from watcher')
+    loadMapPhotos()
+  }
+}, { immediate: true })  // Run immediately to handle initial value
 
 onMounted(() => {
+  console.log('[Mount] viewType:', viewType.value)
   injectStyles()
   loadPhotos()
 })

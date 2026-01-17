@@ -56,26 +56,31 @@
           <span class="nav-arrow">&#8249;</span>
         </button>
 
-        <!-- Loading spinner while waiting for preview -->
-        <div v-if="!thumbnailUrl && !fullSizeUrl" class="lightbox-loading">
-          <span class="loading-spinner large"></span>
+        <!-- 3D cube container for transitions -->
+        <div class="cube-scene">
+          <div :key="imageKey" :class="['cube-face', animationClass]">
+            <!-- Loading spinner while waiting for preview -->
+            <div v-if="!thumbnailUrl && !fullSizeUrl" class="lightbox-loading">
+              <span class="loading-spinner large"></span>
+            </div>
+
+            <!-- Preview image (shown until full-size loads) -->
+            <img
+              v-if="thumbnailUrl && !fullSizeUrl"
+              :src="thumbnailUrl"
+              :alt="photo.name || 'Photo'"
+              class="lightbox-image"
+            />
+
+            <!-- Full-size image (replaces preview when ready) -->
+            <img
+              v-if="fullSizeUrl"
+              :src="fullSizeUrl"
+              :alt="photo.name || 'Photo'"
+              class="lightbox-image"
+            />
+          </div>
         </div>
-
-        <!-- Preview image (shown until full-size loads) -->
-        <img
-          v-if="thumbnailUrl && !fullSizeUrl"
-          :src="thumbnailUrl"
-          :alt="photo.name || 'Photo'"
-          :style="imageStyle"
-        />
-
-        <!-- Full-size image (replaces preview when ready) -->
-        <img
-          v-if="fullSizeUrl"
-          :src="fullSizeUrl"
-          :alt="photo.name || 'Photo'"
-          :style="imageStyle"
-        />
 
         <!-- Navigation: Next (inside image container) -->
         <button
@@ -191,7 +196,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useClientService, useConfigStore } from '@ownclouders/web-pkg'
 import type { Resource } from '@ownclouders/web-client'
 
@@ -292,6 +297,20 @@ const menuItemDangerStyle = computed(() => ({
 const imageLoading = ref(true)
 const imageKey = ref(0)
 
+// Transition direction for cube rotation ('next' or 'prev')
+const transitionDirection = ref<'next' | 'prev'>('next')
+
+// Animation class for cube effect
+const animationClass = ref('')
+
+// Pending animation to apply after element is created
+const pendingAnimation = ref('')
+
+// Computed transition name based on direction (kept for logging)
+const transitionName = computed(() => {
+  return transitionDirection.value === 'next' ? 'cube-next' : 'cube-prev'
+})
+
 // Cache for loaded images (full-size)
 const imageCache = ref<Map<string, string>>(new Map())
 
@@ -329,17 +348,6 @@ const fullSizeUrl = computed(() => {
 // Combined URL for download link (prefer full-size)
 const downloadUrl = computed(() => fullSizeUrl.value || thumbnailUrl.value)
 
-// Inline style for stacked images
-const imageStyle = {
-  position: 'absolute' as const,
-  top: 0,
-  left: 0,
-  width: '100%',
-  height: '100%',
-  objectFit: 'contain' as const,
-  zIndex: 1
-}
-
 // Extract EXIF data from graphPhoto
 const exifData = computed<GraphPhoto>(() => {
   return photoWithDate.value?.graphPhoto || {}
@@ -360,9 +368,38 @@ const folderPath = computed(() => {
 })
 
 // Load current image immediately, then preload others in background
-watch(() => props.photo, async (newPhoto) => {
+watch(() => props.photo, async (newPhoto, oldPhoto) => {
+  console.log('=== [Lightbox] PHOTO WATCHER TRIGGERED ===')
+  console.log('[Lightbox] Old photo:', oldPhoto?.name || 'none')
+  console.log('[Lightbox] New photo:', newPhoto?.name || 'none')
+  console.log('[Lightbox] Pending animation:', pendingAnimation.value)
+
   if (newPhoto) {
     imageKey.value++
+    console.log('[Lightbox] imageKey incremented to:', imageKey.value)
+
+    // Apply pending animation AFTER Vue re-renders (nextTick)
+    if (pendingAnimation.value) {
+      // Use nextTick to wait for Vue to update the DOM
+      await nextTick()
+      console.log('[Lightbox] Applying animation class:', pendingAnimation.value)
+      animationClass.value = pendingAnimation.value
+
+      // Debug: Check DOM state
+      setTimeout(() => {
+        const cubeFace = document.querySelector('.cube-face')
+        console.log('[Lightbox] After animation applied - classList:', cubeFace?.classList.toString())
+        console.log('[Lightbox] Computed animation:', cubeFace ? getComputedStyle(cubeFace).animation : 'N/A')
+      }, 10)
+
+      // Clear animation after it completes
+      setTimeout(() => {
+        console.log('[Lightbox] Clearing animation class')
+        animationClass.value = ''
+        pendingAnimation.value = ''
+      }, 500)
+    }
+
     await loadCurrentImage(newPhoto as PhotoWithDate)
   }
 }, { immediate: true })
@@ -559,6 +596,15 @@ function close() {
 
 function navigate(direction: 'prev' | 'next') {
   menuVisible.value = false  // Close menu when navigating
+  transitionDirection.value = direction  // Set direction for cube animation
+
+  // Store the pending animation - will be applied after Vue re-renders the element
+  pendingAnimation.value = direction === 'next' ? 'slide-in-right' : 'slide-in-left'
+
+  console.log('=== [Lightbox] NAVIGATION START ===')
+  console.log('[Lightbox] Direction:', direction)
+  console.log('[Lightbox] Pending animation:', pendingAnimation.value)
+
   emit('navigate', direction)
 }
 
@@ -646,7 +692,61 @@ function handleTouchEnd(event: TouchEvent) {
   }
 }
 
+// Inject cube animation CSS at runtime (bypasses build issues)
+function injectCubeAnimationCSS() {
+  if (document.getElementById('lightbox-cube-animations')) return
+
+  const style = document.createElement('style')
+  style.id = 'lightbox-cube-animations'
+  style.textContent = `
+    /* Cube Animation CSS - Injected at Runtime */
+    .cube-scene {
+      perspective: 1200px !important;
+      perspective-origin: center center !important;
+      transform-style: preserve-3d !important;
+    }
+
+    .cube-face {
+      transform-style: preserve-3d !important;
+      backface-visibility: hidden !important;
+    }
+
+    @keyframes slideInFromRight {
+      0% {
+        transform: translateX(100%) rotateY(-45deg) scale(0.8);
+        opacity: 0;
+      }
+      100% {
+        transform: translateX(0) rotateY(0deg) scale(1);
+        opacity: 1;
+      }
+    }
+
+    @keyframes slideInFromLeft {
+      0% {
+        transform: translateX(-100%) rotateY(45deg) scale(0.8);
+        opacity: 0;
+      }
+      100% {
+        transform: translateX(0) rotateY(0deg) scale(1);
+        opacity: 1;
+      }
+    }
+
+    .cube-face.slide-in-right {
+      animation: slideInFromRight 0.4s ease-out forwards !important;
+    }
+
+    .cube-face.slide-in-left {
+      animation: slideInFromLeft 0.4s ease-out forwards !important;
+    }
+  `
+  document.head.appendChild(style)
+  console.log('[Lightbox] Injected cube animation CSS')
+}
+
 onMounted(() => {
+  injectCubeAnimationCSS()
   document.addEventListener('keydown', handleKeydown)
   document.body.style.overflow = 'hidden'
   document.documentElement.style.overflow = 'hidden'
@@ -1091,14 +1191,68 @@ function getMapUrl(lat: number, lon: number): string {
   background: var(--oc-color-swatch-primary-hover, #0060d0);
 }
 
-/* Fade transition for image changes */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
+/* 3D Cube scene container */
+.cube-scene {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  perspective: 1200px !important;
+  perspective-origin: center center !important;
+  overflow: hidden !important;
+  transform-style: preserve-3d !important;
 }
 
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+.cube-face {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  backface-visibility: hidden !important;
+  transform-style: preserve-3d !important;
+  background: #000 !important;
+}
+
+.cube-face .lightbox-image {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+/* Keyframe animations for photo transitions */
+@keyframes slideInFromRight {
+  0% {
+    transform: translateX(100%) rotateY(-30deg) scale(0.85);
+    opacity: 0.3;
+  }
+  100% {
+    transform: translateX(0) rotateY(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInFromLeft {
+  0% {
+    transform: translateX(-100%) rotateY(30deg) scale(0.85);
+    opacity: 0.3;
+  }
+  100% {
+    transform: translateX(0) rotateY(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+/* Animation classes */
+.cube-face.slide-in-right {
+  animation: slideInFromRight 0.4s ease-out !important;
+}
+
+.cube-face.slide-in-left {
+  animation: slideInFromLeft 0.4s ease-out !important;
 }
 </style>
