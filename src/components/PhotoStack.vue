@@ -34,7 +34,7 @@
     <div class="stack-overlay">
       <span class="stack-name">{{ topPhoto.name }}</span>
       <span v-if="photos.length > 1" class="stack-count">
-        +{{ photos.length - 1 }} more
+        {{ t('stack.morePhotos', { count: photos.length - 1 }) }}
       </span>
     </div>
   </div>
@@ -43,10 +43,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Resource } from '@ownclouders/web-client'
+import { useI18n } from '../composables/useI18n'
 
 interface PhotoWithDate extends Resource {
   exifDate?: string
-  exifTime?: string // For future use with native EXIF
+  exifTime?: string
 }
 
 const props = defineProps<{
@@ -57,6 +58,8 @@ const props = defineProps<{
 defineEmits<{
   (e: 'click'): void
 }>()
+
+const { t } = useI18n()
 
 // Top photo is the first one (most recent in the group)
 const topPhoto = computed(() => props.photos[0])

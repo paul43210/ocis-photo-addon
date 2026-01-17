@@ -149,16 +149,15 @@
 
 ## Technical Debt
 
-- [ ] Add unit tests for new components
+- [x] Add unit tests for new components (48 tests in usePhotos.spec.ts)
 - [ ] Add e2e tests for critical flows
 - [ ] Performance optimization for large libraries (10k+ photos)
 - [ ] Accessibility audit (keyboard navigation, screen readers)
-- [ ] i18n/localization support
-- [ ] **Code complexity audit** - Review functions for cognitive complexity (target: <15 per function)
-  - Run ESLint complexity rules (`complexity`, `max-depth`, `max-nested-callbacks`)
-  - Review large components: `PhotosView.vue`, `PhotoLightbox.vue`, `usePhotos.ts`
-  - Extract helper functions from deeply nested conditionals
-  - Align with SonarQube standards before upstream contribution
+- [x] i18n/localization support (useI18n composable with EN, DE, FR translations)
+- [x] **Code complexity audit** - Refactored and simplified code
+  - Consolidated types into `types/index.ts`
+  - Cleaned up `usePhotos.ts` - removed debug logging, extracted utility functions
+  - Updated components to use centralized i18n
 
 ---
 

@@ -4,27 +4,22 @@
  */
 
 import type { Resource } from '@ownclouders/web-client'
-
-// Supported image extensions (strict list)
-const IMAGE_EXTENSIONS = new Set([
-  'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'tiff', 'tif'
-])
+import { IMAGE_EXTENSIONS, type GroupMode } from '../types'
 
 export function usePhotos() {
 
   /**
    * Check if a file is an image based on MIME type (primary) and extension (fallback)
-   * Very strict - only actual photo formats
    */
   function isImage(file: Resource): boolean {
     const name = (file.name || '').toLowerCase()
 
-    // STRICT: Exclude any file containing .json, .xml, .txt in the name
+    // Exclude metadata/sidecar files
     if (name.includes('.json') || name.includes('.xml') || name.includes('.txt')) {
       return false
     }
 
-    // Must have a MIME type that starts with 'image/'
+    // Check MIME type first (most reliable)
     if (file.mimeType) {
       const mime = file.mimeType.toLowerCase()
       if (!mime.startsWith('image/')) {
@@ -37,13 +32,13 @@ export function usePhotos() {
       return true
     }
 
-    // Fallback: check extension (strict list)
+    // Fallback: check extension
     const ext = name.split('.').pop() || ''
     return IMAGE_EXTENSIONS.has(ext)
   }
 
   /**
-   * Check if file has our EXIF imported tag
+   * Check if file has EXIF imported tag
    */
   function hasExifTag(file: Resource): boolean {
     const tags = (file as any).tags
@@ -59,73 +54,9 @@ export function usePhotos() {
   }
 
   /**
-   * Get file extension (lowercase)
-   */
-  function getExtension(filename: string): string | null {
-    const parts = filename.split('.')
-    if (parts.length < 2) return null
-    return parts[parts.length - 1].toLowerCase()
-  }
-
-  // Debug counter for limiting verbose logging
-  let filterDebugCount = 0
-
-  /**
    * Filter a list of resources to only include images
-   * Now uses built-in oCIS photo metadata (photo.takenDateTime) instead of custom tags
-   * DEBUG: Limited to 10 photos for testing
    */
   function filterImages(files: Resource[]): Resource[] {
-    // Reset debug counter for each filter call
-    filterDebugCount = 0
-
-    const filtered: Resource[] = []
-
-    for (const file of files) {
-      // DEBUG LIMIT: Stop at 10 photos
-      if (filtered.length >= 10) {
-        break
-      }
-
-      // Exclude directories
-      if (file.isFolder || file.type === 'folder') {
-        continue
-      }
-
-      const img = isImage(file)
-      if (!img) continue
-
-      filtered.push(file)
-
-      // Debug: log first few resources to see structure
-      if (filterDebugCount < 5) {
-        filterDebugCount++
-        const f = file as any
-        console.log(`[usePhotos] Resource ${filterDebugCount}:`, file.name)
-        console.log(`  - file.photo:`, file.photo)
-        console.log(`  - file.photo?.takenDateTime:`, file.photo?.takenDateTime)
-        console.log(`  - file.mdate:`, file.mdate)
-        // Check for any EXIF-like properties
-        const exifProps = Object.keys(f).filter(k =>
-          k.toLowerCase().includes('exif') ||
-          k.toLowerCase().includes('date') ||
-          k.toLowerCase().includes('photo') ||
-          k.toLowerCase().includes('taken')
-        )
-        if (exifProps.length > 0) {
-          console.log(`  - EXIF-related props:`, exifProps.map(k => `${k}=${f[k]}`))
-        }
-      }
-    }
-
-    console.log(`filterImages: ${files.length} files -> ${filtered.length} photos (DEBUG LIMIT: 10)`)
-    return filtered
-  }
-
-  /**
-   * Filter images without requiring EXIF tag (for browsing unprocessed)
-   */
-  function filterAllImages(files: Resource[]): Resource[] {
     return files.filter(file => {
       if (file.isFolder || file.type === 'folder') {
         return false
@@ -134,7 +65,12 @@ export function usePhotos() {
     })
   }
 
-  type GroupMode = 'day' | 'week' | 'month' | 'year'
+  /**
+   * Filter images without requiring EXIF tag
+   */
+  function filterAllImages(files: Resource[]): Resource[] {
+    return filterImages(files)
+  }
 
   /**
    * Extract EXIF date from a file resource
@@ -145,7 +81,6 @@ export function usePhotos() {
    */
   function getExifDate(file: Resource): Date | null {
     // Primary: Check official oCIS photo.takenDateTime field
-    // This is populated from EXIF DateTimeOriginal during Tika indexing
     if (file.photo?.takenDateTime) {
       const parsed = parseExifDate(file.photo.takenDateTime)
       if (parsed) {
@@ -156,29 +91,15 @@ export function usePhotos() {
     // Fallback: Check legacy/alternate property locations
     const f = file as any
     const fallbackSources = [
-      // Direct properties (legacy)
       f.exifDateTimeOriginal,
       f.exifDate,
       f.dateTaken,
       f.photoTakenTime,
       f.dateTimeOriginal,
-
-      // Nested in metadata object
       f.metadata?.exifDateTimeOriginal,
       f.metadata?.dateTaken,
-      f.metadata?.photoTakenTime,
-      f.metadata?.dateTimeOriginal,
-
-      // Custom WebDAV properties (oc: namespace)
       f['oc:exif-date'],
       f['oc:date-taken'],
-      f['oc:photo-taken-time'],
-
-      // Additional common property names
-      f.additionalData?.exifDate,
-      f.additionalData?.dateTaken,
-
-      // Tags-based (if stored as structured data)
       f.exif?.DateTimeOriginal,
       f.exif?.DateTime,
     ]
@@ -197,7 +118,6 @@ export function usePhotos() {
 
   /**
    * Parse various EXIF date formats
-   * EXIF dates can be: Unix timestamp, ISO string, or "YYYY:MM:DD HH:MM:SS" format
    */
   function parseExifDate(value: any): Date | null {
     if (!value) return null
@@ -250,24 +170,20 @@ export function usePhotos() {
    * Priority: 1) EXIF data, 2) File modification date
    */
   function getPhotoDate(file: Resource): Date {
-    // First, try to get EXIF date
     const exifDate = getExifDate(file)
     if (exifDate) {
       return exifDate
     }
 
-    // Fall back to file modification date
     if (file.mdate) {
       return new Date(file.mdate)
     }
 
-    // Last resort: current date
     return new Date()
   }
 
   /**
    * Get date string based on grouping mode
-   * Uses EXIF date if available, falls back to mdate
    */
   function getDateKey(file: Resource, mode: GroupMode = 'day'): string {
     const date = getPhotoDate(file)
@@ -282,7 +198,6 @@ export function usePhotos() {
       case 'month':
         return `${year}-${month}`
       case 'week':
-        // Get ISO week number
         const weekNum = getISOWeek(date)
         return `${year}-W${String(weekNum).padStart(2, '0')}`
       case 'day':
@@ -312,7 +227,7 @@ export function usePhotos() {
 
     switch (mode) {
       case 'year':
-        return dateKey // Just the year
+        return dateKey
       case 'month': {
         const [year, month] = dateKey.split('-').map(Number)
         const date = new Date(year, month - 1, 1)
@@ -321,7 +236,6 @@ export function usePhotos() {
       case 'week': {
         const [year, weekPart] = dateKey.split('-W')
         const weekNum = parseInt(weekPart)
-        // Get first day of the week
         const firstDayOfYear = new Date(parseInt(year), 0, 1)
         const daysOffset = (weekNum - 1) * 7
         const weekStart = new Date(firstDayOfYear)
@@ -360,7 +274,6 @@ export function usePhotos() {
     }
 
     // Sort each group by time (newest first within each group)
-    // Uses EXIF date when available, falls back to mdate
     for (const [, groupPhotos] of groups) {
       groupPhotos.sort((a, b) => {
         const timeA = getPhotoDate(a).getTime()
@@ -390,6 +303,41 @@ export function usePhotos() {
     return counts
   }
 
+  /**
+   * Calculate distance between two GPS coordinates using Haversine formula
+   * Returns distance in meters
+   */
+  function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000 // Earth's radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180
+    const dLon = (lon2 - lon1) * Math.PI / 180
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return R * c
+  }
+
+  /**
+   * Format file size for display
+   */
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
+  }
+
+  /**
+   * Format date for display
+   */
+  function formatDate(date: Date): string {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
   return {
     isImage,
     hasExifTag,
@@ -401,8 +349,13 @@ export function usePhotos() {
     getPhotoCountsByDate,
     getPhotoDate,
     getExifDate,
+    parseExifDate,
+    getISOWeek,
+    calculateDistance,
+    formatSize,
+    formatDate,
     IMAGE_EXTENSIONS: Array.from(IMAGE_EXTENSIONS)
   }
 }
 
-export type GroupMode = 'day' | 'week' | 'month' | 'year'
+export type { GroupMode }
