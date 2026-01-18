@@ -50,10 +50,19 @@
 ### 🟡 Web Extensions Contribution
 - [x] Draft proposal created for `owncloud/web-extensions` repo
 - [x] Submitted issue to web-extensions repo proposing photo-addon and advanced-search
-- [ ] Wait for maintainer feedback on interest/naming/scope
+- [x] Received positive response from maintainer - "this is awesome, please go ahead!"
+- [ ] Wait for maintainer feedback on clarifying questions
 - [ ] Fork and restructure to `web-app-photos` and `web-app-advanced-search`
 - [ ] Update license from Apache-2.0 to AGPL-3.0
 - [ ] Submit PRs after backend PR merges
+
+### 🔴 Deployment Example Updates (Requested by Maintainer)
+- [ ] **Update `ocis_full` deployment example** after web-extensions PR accepted
+- [ ] Add `.env` entry: `#PHOTOADDON=:web_extensions/photoaddon.yml`
+- [ ] Create `web_extensions/photoaddon.yml` with init container config
+- [ ] Add CSP configuration for Leaflet.js CDN and OpenStreetMap tiles
+- [ ] Test deployment with Docker Compose
+- **Reference:** https://github.com/owncloud/ocis/blob/master/deployments/examples/ocis_full/
 
 ---
 
