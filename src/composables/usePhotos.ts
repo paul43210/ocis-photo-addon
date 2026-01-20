@@ -38,22 +38,6 @@ export function usePhotos() {
   }
 
   /**
-   * Check if file has EXIF imported tag
-   */
-  function hasExifTag(file: Resource): boolean {
-    const tags = (file as any).tags
-    if (!tags) return false
-
-    if (Array.isArray(tags)) {
-      return tags.some(t => t && t.includes('exifimported'))
-    }
-    if (typeof tags === 'string') {
-      return tags.includes('exifimported')
-    }
-    return false
-  }
-
-  /**
    * Filter a list of resources to only include images
    */
   function filterImages(files: Resource[]): Resource[] {
@@ -63,13 +47,6 @@ export function usePhotos() {
       }
       return isImage(file)
     })
-  }
-
-  /**
-   * Filter images without requiring EXIF tag
-   */
-  function filterAllImages(files: Resource[]): Resource[] {
-    return filterImages(files)
   }
 
   /**
@@ -117,21 +94,36 @@ export function usePhotos() {
   }
 
   /**
-   * Parse various EXIF date formats
+   * Parse various EXIF date formats into a JavaScript Date object.
+   *
+   * Supported formats (in order of detection):
+   * 1. Unix timestamp in seconds (e.g., 1609459200 → Jan 1, 2021)
+   * 2. Unix timestamp in milliseconds (e.g., 1609459200000)
+   * 3. Object with timestamp property: { timestamp: "1609459200" } (legacy Tika format)
+   * 4. EXIF string format: "YYYY:MM:DD HH:MM:SS" (standard EXIF DateTimeOriginal)
+   * 5. ISO 8601 or any format parseable by Date constructor
+   *
+   * The 32503680000 threshold distinguishes seconds from milliseconds:
+   * - Values below this are treated as seconds (year 3000 in Unix seconds)
+   * - Values above are treated as milliseconds
+   *
+   * @param value - The date value in any supported format
+   * @returns Parsed Date object, or null if parsing fails
    */
   function parseExifDate(value: any): Date | null {
     if (!value) return null
 
-    // Handle Unix timestamp (seconds or milliseconds)
+    // Format 1 & 2: Unix timestamp (seconds or milliseconds)
     if (typeof value === 'number') {
-      // If it looks like seconds (before year 3000 in seconds)
+      // 32503680000 = Jan 1, 3000 in Unix seconds
+      // If value is less, it's likely seconds; otherwise milliseconds
       if (value < 32503680000) {
         return new Date(value * 1000)
       }
       return new Date(value)
     }
 
-    // Handle timestamp object { timestamp: "..." }
+    // Format 3: Legacy Tika extractor format { timestamp: "..." }
     if (typeof value === 'object' && value.timestamp) {
       const ts = parseInt(value.timestamp)
       if (!isNaN(ts)) {
@@ -139,15 +131,15 @@ export function usePhotos() {
       }
     }
 
-    // Handle string formats
+    // Format 4 & 5: String formats
     if (typeof value === 'string') {
-      // Try EXIF format: "YYYY:MM:DD HH:MM:SS"
+      // EXIF standard format uses colons in date: "2021:01:15 14:30:00"
       const exifMatch = value.match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})$/)
       if (exifMatch) {
         const [, year, month, day, hour, min, sec] = exifMatch
         return new Date(
           parseInt(year),
-          parseInt(month) - 1,
+          parseInt(month) - 1,  // JS months are 0-indexed
           parseInt(day),
           parseInt(hour),
           parseInt(min),
@@ -155,7 +147,7 @@ export function usePhotos() {
         )
       }
 
-      // Try ISO format or other parseable strings
+      // Try ISO 8601 or other formats parseable by Date constructor
       const parsed = new Date(value)
       if (!isNaN(parsed.getTime())) {
         return parsed
@@ -207,13 +199,38 @@ export function usePhotos() {
   }
 
   /**
-   * Get ISO week number
+   * Calculate ISO 8601 week number for a given date.
+   *
+   * ISO 8601 week rules:
+   * - Weeks start on Monday (not Sunday)
+   * - Week 1 is the week containing the first Thursday of the year
+   * - Days before week 1 belong to the last week of the previous year
+   *
+   * Algorithm explanation:
+   * 1. Convert to UTC to avoid timezone issues
+   * 2. Map Sunday (0) to 7, keeping Mon=1...Sat=6 (ISO weekday numbering)
+   * 3. Find the Thursday of the current week (Thursday determines the week's year)
+   * 4. Calculate days since Jan 1 of that Thursday's year
+   * 5. Divide by 7 (86400000ms/day) and round up for week number
+   *
+   * @param date - The date to get the week number for
+   * @returns ISO week number (1-53), or 1 for invalid dates
    */
   function getISOWeek(date: Date): number {
+    // Validate input date
+    if (!date || isNaN(date.getTime())) {
+      return 1
+    }
+    // Use UTC to avoid timezone-related date shifts
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+    // ISO weekday: Mon=1, Tue=2, ..., Sun=7 (JS getUTCDay returns Sun=0)
     const dayNum = d.getUTCDay() || 7
+    // Move to Thursday of current week (Thursday determines the week's year)
     d.setUTCDate(d.getUTCDate() + 4 - dayNum)
+    // January 1st of the Thursday's year
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+    // Calculate week number: days since year start / 7, rounded up
+    // 86400000 = milliseconds per day (24 * 60 * 60 * 1000)
     return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
   }
 
@@ -304,13 +321,31 @@ export function usePhotos() {
   }
 
   /**
-   * Calculate distance between two GPS coordinates using Haversine formula
-   * Returns distance in meters
+   * Calculate great-circle distance between two GPS coordinates using the Haversine formula.
+   *
+   * The Haversine formula calculates the shortest distance over the Earth's surface
+   * (the "as-the-crow-flies" distance), accounting for the Earth's spherical shape.
+   *
+   * Formula: a = sin²(Δlat/2) + cos(lat1) × cos(lat2) × sin²(Δlon/2)
+   *          c = 2 × atan2(√a, √(1−a))
+   *          d = R × c
+   *
+   * Accuracy: ~0.5% error due to Earth being an oblate spheroid, not a perfect sphere.
+   * For photo clustering purposes (comparing distances of ~100m to ~10km), this is sufficient.
+   *
+   * @param lat1 - Latitude of first point in degrees
+   * @param lon1 - Longitude of first point in degrees
+   * @param lat2 - Latitude of second point in degrees
+   * @param lon2 - Longitude of second point in degrees
+   * @returns Distance in meters
    */
   function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371000 // Earth's radius in meters
+    // Earth's mean radius in meters (WGS84 approximation)
+    const R = 6371000
+    // Convert degree differences to radians
     const dLat = (lat2 - lat1) * Math.PI / 180
     const dLon = (lon2 - lon1) * Math.PI / 180
+    // Haversine formula
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
       Math.sin(dLon / 2) * Math.sin(dLon / 2)
@@ -340,9 +375,7 @@ export function usePhotos() {
 
   return {
     isImage,
-    hasExifTag,
     filterImages,
-    filterAllImages,
     groupByDate,
     getDateKey,
     formatDateKey,

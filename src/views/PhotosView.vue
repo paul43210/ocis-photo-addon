@@ -10,19 +10,19 @@
   >
     <div class="photos-header">
       <div class="header-top">
-        <h1>Photos ({{ viewType === 'map' ? `${mapVisibleCount} of ${mapTotalCount} in view` : photoCount }})</h1>
+        <h1>{{ t('app.title') }} ({{ viewType === 'map' ? t('app.photosInView', { visible: mapVisibleCount, total: mapTotalCount }) : photoCount }})</h1>
         <div class="header-controls">
           <!-- Date filter (hidden in map view) -->
           <div v-if="viewType !== 'map'" class="date-filter">
-            <span class="control-label">Jump to:</span>
+            <span class="control-label">{{ t('filter.jumpTo') }}</span>
             <select v-model="filterYear" @change="onDateFilterChange" class="date-select">
               <option v-for="year in availableYears" :key="year" :value="year">{{ year }}</option>
             </select>
             <select v-model="filterMonth" @change="onDateFilterChange" class="date-select">
               <option v-for="(name, index) in monthNames" :key="index" :value="index">{{ name }}</option>
             </select>
-            <button v-if="!isCurrentMonth" @click="jumpToToday" class="today-btn" title="Jump to today">
-              Today
+            <button v-if="!isCurrentMonth" @click="jumpToToday" class="today-btn" :title="t('filter.today')">
+              {{ t('filter.today') }}
             </button>
           </div>
           <!-- View type selector (Calendar / Map) -->
@@ -31,61 +31,61 @@
               :class="['view-btn', { active: viewType === 'calendar' }]"
               @click="viewType = 'calendar'"
             >
-              Calendar
+              {{ t('view.calendar') }}
             </button>
             <button
               :class="['view-btn', { active: viewType === 'map' }]"
               @click="viewType = 'map'"
             >
-              Map
+              {{ t('view.map') }}
             </button>
           </div>
           <!-- EXIF only toggle (hidden in map view) -->
           <label v-if="viewType !== 'map'" class="exif-toggle">
             <input type="checkbox" v-model="exifOnly" />
-            <span class="toggle-label">EXIF only</span>
+            <span class="toggle-label">{{ t('filter.exifOnly') }}</span>
           </label>
         </div>
       </div>
 
-      <!-- Breadcrumb Navigation (DISABLED)
-      <div class="breadcrumb-nav">
-        <button
-          class="breadcrumb-item"
-          :class="{ active: !selectedFolder }"
-          @click="clearFolderFilter"
-        >
-          All Photos
-        </button>
-        <template v-for="(part, index) in breadcrumbParts" :key="index">
-          <span class="breadcrumb-separator">›</span>
-          <button
-            class="breadcrumb-item"
-            :class="{ active: index === breadcrumbParts.length - 1 }"
-            @click="navigateToBreadcrumb(index)"
-          >
-            {{ part }}
-          </button>
-        </template>
-      </div>
-      -->
-
-      <p v-if="loading" class="loading-status">
+      <p v-if="loading && !error" class="loading-status">
         <span class="spinner"></span>
-        Loading {{ currentDateRange }}... {{ photoCount }} photos
+        {{ t('loading.status', { range: currentDateRange, count: photoCount }) }}
       </p>
-      <p v-else-if="error" class="error">{{ error }}</p>
-      <p v-else-if="viewType !== 'map'" class="photo-count">
-        <span v-if="isFullyLoaded" class="complete-hint">All photos loaded</span>
+      <p v-else-if="viewType !== 'map' && !error" class="photo-count">
+        <span v-if="isFullyLoaded" class="complete-hint">{{ t('app.allPhotosLoaded') }}</span>
       </p>
+    </div>
+
+    <!-- Error State -->
+    <div v-if="error" class="error-state">
+      <div class="error-icon">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <circle cx="12" cy="16" r="0.5" fill="currentColor" />
+        </svg>
+      </div>
+      <h2 class="error-title">{{ errorTitle }}</h2>
+      <p class="error-message">{{ error }}</p>
+      <div class="error-suggestions" v-if="errorSuggestions.length > 0">
+        <p class="suggestions-label">{{ t('error.thingsToTry') }}</p>
+        <ul>
+          <li v-for="(suggestion, index) in errorSuggestions" :key="index">{{ suggestion }}</li>
+        </ul>
+      </div>
+      <button @click="retryLoad" class="retry-button">
+        <span class="retry-icon">↻</span>
+        {{ t('error.tryAgain') }}
+      </button>
     </div>
 
     <!-- Calendar View -->
     <div v-if="!error && viewType === 'calendar'" class="photos-content">
       <div v-if="!loading && photoCount === 0" class="empty-state">
         <span class="empty-icon">📷</span>
-        <p>No photos found</p>
-        <p class="empty-hint">Photos will appear here after EXIF tags are synced</p>
+        <p>{{ t('empty.noPhotos') }}</p>
+        <p class="empty-hint">{{ t('empty.hint') }}</p>
       </div>
 
       <div v-else class="photo-groups">
@@ -109,15 +109,6 @@
                   loading="lazy"
                   @error="handleImageError"
                 />
-                <!-- Folder filter button (DISABLED)
-                <button
-                  class="folder-filter-btn"
-                  @click.stop="selectFolder(subGroup.photos[0].filePath || '')"
-                  title="Show photos from this folder"
-                >
-                  📁
-                </button>
-                -->
                 <div class="photo-overlay">
                   <span class="photo-name">{{ subGroup.photos[0].name }}</span>
                 </div>
@@ -134,7 +125,7 @@
         </div>
 
         <div v-if="loadingMore" class="loading-more">
-          Loading more photos...
+          {{ t('loading.more') }}
         </div>
       </div>
     </div>
@@ -179,81 +170,48 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useClientService, useSpacesStore, useConfigStore } from '@ownclouders/web-pkg'
 import { Resource, SpaceResource } from '@ownclouders/web-client'
 import PhotoLightbox from '../components/PhotoLightbox.vue'
 import PhotoStack from '../components/PhotoStack.vue'
 import PhotoContextMenu from '../components/PhotoContextMenu.vue'
 import PhotoMap from '../components/PhotoMap.vue'
+import { usePhotos } from '../composables/usePhotos'
+import { useI18n } from '../composables/useI18n'
+import type {
+  GeoCoordinates,
+  GraphPhoto,
+  PhotoWithDate,
+  PhotoSubGroup,
+  GroupMode,
+  ViewType,
+  IMAGE_EXTENSIONS as IMAGE_EXTENSIONS_TYPE
+} from '../types'
+import { IMAGE_EXTENSIONS } from '../types'
 
-// Types for Graph API response
-interface GeoCoordinates {
-  latitude?: number
-  longitude?: number
-  altitude?: number
-}
+// Initialize composable for shared utility functions
+const {
+  getISOWeek,
+  calculateDistance,
+  formatSize,
+  formatDate: formatDateYMD
+} = usePhotos()
 
-interface GraphPhoto {
-  cameraMake?: string
-  cameraModel?: string
-  fNumber?: number
-  focalLength?: number
-  iso?: number
-  orientation?: number
-  takenDateTime?: string
-  exposureNumerator?: number
-  exposureDenominator?: number
-}
-
-interface GraphDriveItem {
-  id: string
-  name: string
-  file?: { mimeType: string }
-  folder?: { childCount: number }
-  photo?: GraphPhoto
-  location?: GeoCoordinates
-  lastModifiedDateTime?: string
-  size?: number
-  parentReference?: { driveId: string; id: string; path: string }
-  webDavUrl?: string
-}
-
-interface GraphResponse {
-  value: GraphDriveItem[]
-  '@odata.nextLink'?: string
-}
-
-// Types
-interface PhotoWithDate extends Resource {
-  exifDate?: string  // YYYY-MM-DD from EXIF or mtime
-  exifTime?: string  // HH:MM:SS
-  timestamp?: number // Unix timestamp for sorting/grouping
-  dateSource?: string // Track where the date came from (for debugging)
-  graphPhoto?: GraphPhoto & { location?: GeoCoordinates } // Original Graph API photo metadata + location
-  filePath?: string  // Full file path (our custom property, since Resource.path may be read-only)
-}
-
-// A sub-group (stack) of photos taken close together
-interface PhotoSubGroup {
-  id: string
-  photos: PhotoWithDate[]
-  timestamp: number // Earliest timestamp in group
-}
-
-type GroupMode = 'day' | 'week' | 'month' | 'year'
+// Initialize i18n
+const { t, getMonthNames } = useI18n()
 
 const clientService = useClientService()
 const spacesStore = useSpacesStore()
 const configStore = useConfigStore()
 
-// Group mode options
-const groupModes = [
-  { value: 'day' as GroupMode, label: 'Day' },
-  { value: 'week' as GroupMode, label: 'Week' },
-  { value: 'month' as GroupMode, label: 'Month' },
-  { value: 'year' as GroupMode, label: 'Year' }
-]
+// Group mode options (labels are computed for i18n reactivity)
+const groupModes = computed(() => [
+  { value: 'day' as GroupMode, label: t('groupMode.day') },
+  { value: 'week' as GroupMode, label: t('groupMode.week') },
+  { value: 'month' as GroupMode, label: t('groupMode.month') },
+  { value: 'year' as GroupMode, label: t('groupMode.year') }
+])
 
 // LocalStorage keys for persistent settings
 const STORAGE_KEY_GROUP_MODE = 'photo-addon:groupMode'
@@ -277,9 +235,6 @@ function getStoredExifOnly(): boolean {
   } catch (e) { /* ignore */ }
   return false
 }
-
-// View type (calendar or map)
-type ViewType = 'calendar' | 'map'
 
 function getStoredViewType(): ViewType {
   try {
@@ -309,10 +264,10 @@ const zoomLevels: GroupMode[] = ['day', 'week', 'month', 'year']
 // Zoom indicator text
 const zoomIndicatorText = computed(() => {
   switch (groupMode.value) {
-    case 'day': return 'Day'
-    case 'week': return 'Week'
-    case 'month': return 'Month'
-    case 'year': return 'Year'
+    case 'day': return t('groupMode.day')
+    case 'week': return t('groupMode.week')
+    case 'month': return t('groupMode.month')
+    case 'year': return t('groupMode.year')
     default: return ''
   }
 })
@@ -352,7 +307,27 @@ function zoomOut() {
   }
 }
 
-// Pinch gesture handlers (calendar view only)
+/**
+ * Pinch gesture handlers for zoom control (calendar view only).
+ *
+ * Pinch-to-zoom changes the date grouping granularity:
+ * - Pinch (fingers together): Zoom OUT → less detail (day → week → month → year)
+ * - Spread (fingers apart): Zoom IN → more detail (year → month → week → day)
+ *
+ * Threshold ratios (0.6 and 1.6):
+ * - 0.6 = fingers 40% closer than start → zoom out
+ * - 1.6 = fingers 60% farther than start → zoom in
+ *
+ * Why these specific values?
+ * - Far enough from 1.0 to avoid accidental triggers from finger jitter
+ * - Close enough to feel responsive (users don't need to spread fingers 2x)
+ * - Symmetric around 1.0 in log scale: log(0.6) ≈ -0.51, log(1.6) ≈ 0.47
+ *
+ * Continuous pinch behavior:
+ * - After each zoom level change, baseline resets to current distance
+ * - Allows multi-step zoom without lifting fingers (day→week→month in one gesture)
+ * - User can pinch, hold, pinch again to continue zooming
+ */
 function handlePinchStart(event: TouchEvent) {
   if (viewType.value !== 'calendar') return
   if (event.touches.length === 2) {
@@ -368,15 +343,16 @@ function handlePinchMove(event: TouchEvent) {
   const currentDistance = getTouchDistance(event.touches)
   const ratio = currentDistance / initialPinchDistance
 
-  // Change zoom at specific thresholds (continuous pinch)
-  // Pinch (fingers together, ratio < 1) = zoom out (less detail: day -> year)
-  // Spread (fingers apart, ratio > 1) = zoom in (more detail: year -> day)
-  if (ratio < 0.6) {
+  // Trigger zoom when ratio crosses threshold
+  const PINCH_THRESHOLD = 0.6   // 40% closer = zoom out
+  const SPREAD_THRESHOLD = 1.6  // 60% farther = zoom in
+
+  if (ratio < PINCH_THRESHOLD) {
     zoomOut()
-    initialPinchDistance = currentDistance // Reset baseline
-  } else if (ratio > 1.6) {
+    initialPinchDistance = currentDistance  // Reset for continuous pinch
+  } else if (ratio > SPREAD_THRESHOLD) {
     zoomIn()
-    initialPinchDistance = currentDistance // Reset baseline
+    initialPinchDistance = currentDistance  // Reset for continuous spread
   }
 }
 
@@ -421,15 +397,6 @@ const contextMenuVisible = ref(false)
 const contextMenuPhoto = ref<PhotoWithDate | null>(null)
 const contextMenuPosition = ref({ x: 0, y: 0 })
 
-// Folder filter for breadcrumb navigation (DISABLED)
-// const selectedFolder = ref<string | null>(null) // null = all photos
-
-// Breadcrumb parts computed from selected folder path (DISABLED)
-// const breadcrumbParts = computed(() => {
-//   if (!selectedFolder.value) return []
-//   return selectedFolder.value.split('/').filter(Boolean)
-// })
-
 // Track loaded photo IDs to avoid duplicates
 const loadedPhotoIds = ref<Set<string>>(new Set())
 
@@ -441,9 +408,8 @@ const now = new Date()
 const filterYear = ref(now.getFullYear())
 const filterMonth = ref(now.getMonth())  // 0-indexed
 
-// Month names for dropdown
-const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December']
+// Month names for dropdown (computed for i18n reactivity)
+const monthNames = computed(() => getMonthNames())
 
 // Available years (current year back to 2015)
 const availableYears = computed(() => {
@@ -464,14 +430,36 @@ const isCurrentMonth = computed(() => {
 // Store personal space reference for thumbnail generation
 let personalSpace: SpaceResource | null = null
 
-// Constants
-const SCROLL_THRESHOLD = 500 // pixels from bottom to trigger load more
-const MIN_PHOTOS_ON_SCREEN = 20 // Minimum photos to show before stopping initial load
-const DAYS_PER_BATCH = 7 // Load 7 days at a time when scrolling
-const MAX_DAYS_BACK = 365 * 10 // Maximum 10 years back to prevent infinite loading
-
-// Supported image extensions (actual photo formats only)
-const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'tiff', 'tif'])
+/**
+ * Infinite scroll and loading configuration constants.
+ *
+ * SCROLL_THRESHOLD (500px):
+ * - Distance from bottom that triggers next batch load
+ * - 500px ≈ 2-3 rows of thumbnails on desktop, ~4-5 on mobile
+ * - Large enough to start loading before user reaches bottom
+ * - Small enough to not waste bandwidth loading unseen content
+ *
+ * MIN_PHOTOS_ON_SCREEN (20):
+ * - Minimum photos shown before initial load stops
+ * - Ensures the grid doesn't look empty on first render
+ * - ~2-3 rows on desktop, enough to fill most mobile screens
+ * - If fewer photos exist in the date range, loading continues backward
+ *
+ * DAYS_PER_BATCH (7):
+ * - Days to search per scroll-triggered load
+ * - 1 week balances search performance vs. load frequency
+ * - Smaller values = more API calls; larger = wasted bandwidth
+ * - Works well with typical photo density (a few photos per day)
+ *
+ * MAX_DAYS_BACK (3650 = 10 years):
+ * - Safety limit to prevent infinite backward loading
+ * - Most users don't have photos > 10 years in one storage
+ * - Prevents runaway API calls if user has very sparse photos
+ */
+const SCROLL_THRESHOLD = 500
+const MIN_PHOTOS_ON_SCREEN = 20
+const DAYS_PER_BATCH = 7
+const MAX_DAYS_BACK = 365 * 10
 
 /**
  * Check if a resource is an actual image file (not sidecar metadata)
@@ -511,18 +499,74 @@ const displayedPhotos = computed(() => {
     photos = photos.filter(photo => photo.dateSource === 'photo.takenDateTime')
   }
 
-  // Apply folder filter (DISABLED)
-  // if (selectedFolder.value) {
-  //   photos = photos.filter(photo => {
-  //     const path = (photo as any).filePath || ''
-  //     return path.startsWith(selectedFolder.value!)
-  //   })
-  // }
-
   return photos
 })
 
 const photoCount = computed(() => displayedPhotos.value.length)
+
+// Error state computed properties
+const errorTitle = computed(() => {
+  const err = error.value || ''
+  if (err.includes('search service') || err.includes('503') || err.includes('Service Unavailable')) {
+    return t('error.searchUnavailable')
+  }
+  if (err.includes('network') || err.includes('Network') || err.includes('ECONNREFUSED')) {
+    return t('error.connection')
+  }
+  if (err.includes('personal space')) {
+    return t('error.storageNotFound')
+  }
+  if (err.includes('401') || err.includes('Unauthorized')) {
+    return t('error.authentication')
+  }
+  return t('error.unableToLoad')
+})
+
+const errorSuggestions = computed(() => {
+  const err = error.value || ''
+  if (err.includes('search service') || err.includes('503') || err.includes('Service Unavailable')) {
+    return [
+      t('error.searchRestarting'),
+      t('error.waitAndRetry'),
+      t('error.contactAdmin')
+    ]
+  }
+  if (err.includes('network') || err.includes('Network') || err.includes('ECONNREFUSED')) {
+    return [
+      t('error.checkConnection'),
+      t('error.serverUnavailable'),
+      t('error.refreshPage')
+    ]
+  }
+  if (err.includes('personal space')) {
+    return [
+      t('error.storageNotFoundHint'),
+      t('error.logOutAndIn'),
+      t('error.contactAdmin')
+    ]
+  }
+  if (err.includes('401') || err.includes('Unauthorized')) {
+    return [
+      t('error.sessionExpired'),
+      t('error.logOutAndIn')
+    ]
+  }
+  return [
+    t('error.refreshPage'),
+    t('error.waitAndRetry')
+  ]
+})
+
+// Retry loading photos
+function retryLoad() {
+  error.value = null
+  if (viewType.value === 'map') {
+    mapPhotosLoaded.value = false
+    loadMapPhotos()
+  } else {
+    loadPhotos()
+  }
+}
 
 // Group photos by date
 const groupedPhotos = computed(() => {
@@ -568,21 +612,37 @@ function getGroupKey(dateStr: string, mode: GroupMode): string {
   }
 }
 
-function getISOWeek(date: Date): number {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
-  const dayNum = d.getUTCDay() || 7
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum)
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
-  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
-}
-
-// Sub-grouping thresholds based on view mode (in milliseconds)
-// Max threshold is 24 hours to keep stacks manageable
+/**
+ * Time thresholds for photo sub-grouping (stacking) by view mode.
+ *
+ * Photos taken within these time windows are grouped into "stacks"
+ * displayed as a single thumbnail with a count badge.
+ *
+ * Threshold rationale:
+ *
+ * - Day (60 seconds): Groups burst shots and quick sequences
+ *   Typical use: Multiple shots of same subject, trying to get the right one
+ *   60s catches burst mode while separating distinct moments
+ *
+ * - Week (1 hour): Groups photos from same activity/location visit
+ *   Typical use: Photos at a restaurant, walking tour segment, event session
+ *   1 hour keeps morning/afternoon at same place together
+ *
+ * - Month (24 hours): Groups photos from same day
+ *   Typical use: Monthly view where each day might be one outing
+ *   24 hours = "same day" regardless of actual time
+ *
+ * - Year (24 hours): Same as month - capped to prevent giant stacks
+ *   Could theoretically use weekly threshold, but 24h keeps stacks reasonable
+ *   Prevents single vacation from becoming one massive 500-photo stack
+ *
+ * All values in milliseconds.
+ */
 const SUB_GROUP_THRESHOLDS: Record<GroupMode, number> = {
-  day: 60 * 1000,             // 60 seconds
-  week: 60 * 60 * 1000,       // 1 hour
+  day: 60 * 1000,             // 60 seconds (burst detection)
+  week: 60 * 60 * 1000,       // 1 hour (activity grouping)
   month: 24 * 60 * 60 * 1000, // 24 hours (same day)
-  year: 24 * 60 * 60 * 1000   // 24 hours (same day) - capped at max
+  year: 24 * 60 * 60 * 1000   // 24 hours (capped at same-day)
 }
 
 /**
@@ -616,21 +676,6 @@ function getPhotoTimestamp(photo: PhotoWithDate): number {
 }
 
 /**
- * Calculate distance between two GPS coordinates using Haversine formula
- * Returns distance in meters
- */
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371000 // Earth's radius in meters
-  const dLat = (lat2 - lat1) * Math.PI / 180
-  const dLon = (lon2 - lon1) * Math.PI / 180
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  return R * c
-}
-
-/**
  * Get GPS location from a photo if available
  */
 function getPhotoLocation(photo: PhotoWithDate): { lat: number, lon: number } | null {
@@ -641,14 +686,35 @@ function getPhotoLocation(photo: PhotoWithDate): { lat: number, lon: number } | 
   return null
 }
 
-// Distance threshold for location-based stack separation (in meters)
+/**
+ * Distance threshold for location-based stack separation (in meters).
+ *
+ * 500m chosen because:
+ * - Large enough to group photos at same venue (restaurant, park, building)
+ * - Small enough to separate nearby but distinct locations (different shops)
+ * - Accounts for GPS accuracy variation (±5-50m depending on conditions)
+ * - Smaller than map clustering (1km) for finer-grained lightbox stacks
+ *
+ * Example: Photos 400m apart at same event stay grouped;
+ * photos at two restaurants 600m apart become separate stacks.
+ *
+ * Only applies when BOTH photos have GPS data (common case: phone photos).
+ * Photos without GPS rely solely on time threshold.
+ */
 const LOCATION_DISTANCE_THRESHOLD = 500
 
 /**
- * Create sub-groups (stacks) from photos based on time proximity and location
- * Photos are split into new stacks if:
- * - Time difference exceeds threshold, OR
- * - Location distance exceeds 500m (when both photos have GPS data)
+ * Create sub-groups (stacks) from photos based on time proximity and location.
+ *
+ * Algorithm:
+ * 1. Sort photos by timestamp (newest first)
+ * 2. Walk through photos, comparing each to current stack's first photo
+ * 3. Start new stack if time OR distance exceeds threshold
+ * 4. Location-based splitting only works when both photos have GPS
+ *
+ * Stack ID format: `group-{timestamp}-{count}`
+ * Note: This could theoretically produce duplicates if two stacks have
+ * identical timestamps and sizes, but this is extremely rare in practice.
  */
 function createSubGroups(photos: PhotoWithDate[], mode: GroupMode): PhotoSubGroup[] {
   if (photos.length === 0) return []
@@ -772,8 +838,8 @@ function formatDateHeader(dateKey: string): string {
   // Full date: 2026-01-11
   const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
 
-  if (date.toDateString() === today.toDateString()) return 'Today'
-  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  if (date.toDateString() === today.toDateString()) return t('date.today')
+  if (date.toDateString() === yesterday.toDateString()) return t('date.yesterday')
 
   return date.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
 }
@@ -814,21 +880,38 @@ function handleScroll() {
   }
 }
 
-// Format date as YYYY-MM-DD
-function formatDate(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
+// Use formatDateYMD from usePhotos composable (imported above)
 
 /**
- * Extract EXIF creation date from resource
- * Priority:
- *   1. resource.photo.takenDateTime (official oCIS SDK field from Tika EXIF extraction)
- *   2. Legacy EXIF property names
- *   3. File modification date (mdate) as last resort
- * Returns: { date: 'YYYY-MM-DD', time: 'HH:MM:SS', timestamp: number, source: string } or null
+ * Extract EXIF creation date from a resource with multi-source fallback.
+ *
+ * Data Source Priority (highest to lowest):
+ *
+ * 1. photo-taken-date-time (WebDAV property)
+ *    - Source: Custom oCIS patch exposing Tika-extracted EXIF via WebDAV PROPFIND
+ *    - Format: ISO 8601 string "2024-01-15T10:30:00Z"
+ *    - Available: Only with patched oCIS backend
+ *
+ * 2. photo.takenDateTime (Graph API / SDK field)
+ *    - Source: Official oCIS photo metadata from Tika EXIF extraction
+ *    - Format: ISO 8601 string
+ *    - Available: oCIS 3.0+ with Tika extractor enabled
+ *
+ * 3. Legacy EXIF fields (various property names)
+ *    - Source: Older Tika configurations, different WebDAV implementations
+ *    - Names: exif.creationdate, exifDateTimeOriginal, dateTimeOriginal, etc.
+ *    - Available: Varies by server configuration
+ *
+ * 4. mdate (file modification time)
+ *    - Source: Filesystem metadata
+ *    - Available: Always, but reflects upload time not photo time
+ *    - Warning: May be inaccurate for photos moved/copied between devices
+ *
+ * The 'source' field in the return value indicates which source was used,
+ * useful for debugging and for UI to indicate data reliability (EXIF vs mdate).
+ *
+ * @param resource - oCIS Resource object from WebDAV or Graph API
+ * @returns Object with date, time, timestamp, and source; or null if no date found
  */
 function extractExifDateTime(resource: Resource): { date: string, time: string, timestamp: number, source: string } | null {
   const r = resource as any
@@ -876,7 +959,7 @@ function extractExifDateTime(resource: Resource): { date: string, time: string, 
     const d = new Date(mdate)
     if (!isNaN(d.getTime())) {
       return {
-        date: formatDate(d),
+        date: formatDateYMD(d),
         time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`,
         timestamp: d.getTime(),
         source: 'mdate'
@@ -911,7 +994,7 @@ function parseExifDate(dateStr: string): { date: string, time: string, timestamp
     const d = new Date(dateStr)
     if (!isNaN(d.getTime())) {
       return {
-        date: formatDate(d),
+        date: formatDateYMD(d),
         time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`,
         timestamp: d.getTime()
       }
@@ -924,21 +1007,52 @@ function parseExifDate(dateStr: string): { date: string, time: string, timestamp
 }
 
 /**
- * Parse WebDAV PROPFIND XML response into PhotoWithDate array
+ * Parse WebDAV REPORT response XML into PhotoWithDate array.
+ *
+ * WebDAV XML Namespaces used:
+ * - "DAV:" - Standard WebDAV namespace (RFC 4918)
+ *   Elements: response, href, propstat, prop, getcontenttype, getcontentlength, getlastmodified
+ *
+ * - "http://owncloud.org/ns" - ownCloud/oCIS custom namespace
+ *   Elements: fileid, photo-taken-date-time, photo-camera-make, photo-camera-model,
+ *             photo-f-number, photo-focal-length, photo-iso, photo-orientation,
+ *             photo-exposure-numerator, photo-exposure-denominator,
+ *             photo-location-latitude, photo-location-longitude, photo-location-altitude
+ *
+ * Response structure:
+ * ```xml
+ * <d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+ *   <d:response>
+ *     <d:href>/dav/spaces/spaceid/Photos/IMG_001.jpg</d:href>
+ *     <d:propstat>
+ *       <d:prop>
+ *         <d:getcontenttype>image/jpeg</d:getcontenttype>
+ *         <oc:fileid>abc123</oc:fileid>
+ *         <oc:photo-taken-date-time>2024-01-15T10:30:00Z</oc:photo-taken-date-time>
+ *         ...
+ *       </d:prop>
+ *     </d:propstat>
+ *   </d:response>
+ * </d:multistatus>
+ * ```
+ *
+ * @param xmlText - Raw XML response from WebDAV REPORT request
+ * @param spaceId - Storage space ID for constructing photo paths
+ * @returns Array of PhotoWithDate objects with extracted metadata
  */
 function parseSearchResponse(xmlText: string, spaceId: string): PhotoWithDate[] {
   const photos: PhotoWithDate[] = []
   const parser = new DOMParser()
   const doc = parser.parseFromString(xmlText, 'application/xml')
 
-  // Check for parse errors
+  // Check for parse errors (malformed XML)
   const parseError = doc.querySelector('parsererror')
   if (parseError) {
     console.error('[Search] XML parse error:', parseError.textContent)
     return photos
   }
 
-  // Find all response elements (handle namespaced and non-namespaced)
+  // Find all response elements using DAV namespace
   const responses = doc.getElementsByTagNameNS('DAV:', 'response')
 
   for (let i = 0; i < responses.length; i++) {
@@ -1026,13 +1140,13 @@ function parseSearchResponse(xmlText: string, spaceId: string): PhotoWithDate[] 
 
       if (takenDateTimeEl?.textContent) {
         const d = new Date(takenDateTimeEl.textContent)
-        exifDate = formatDate(d)
+        exifDate = formatDateYMD(d)
         exifTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
         timestamp = d.getTime()
         dateSource = 'photo.takenDateTime'
       } else if (lastModified) {
         const d = new Date(lastModified)
-        exifDate = formatDate(d)
+        exifDate = formatDateYMD(d)
         exifTime = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
         timestamp = d.getTime()
         dateSource = 'lastModifiedDateTime'
@@ -1070,8 +1184,8 @@ function parseSearchResponse(xmlText: string, spaceId: string): PhotoWithDate[] 
       } as PhotoWithDate
 
       photos.push(photoResource)
-    } catch (err) {
-      console.error('[Search] Error parsing response element:', err)
+    } catch {
+      // Skip malformed response elements
     }
   }
 
@@ -1142,8 +1256,6 @@ async function fetchPhotosViaSearch(driveId: string, dateRange: { start: string,
   </d:prop>
 </oc:search-files>`
 
-  console.log('[Search] Date-filtered request:', { spaceId, pattern, url: `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}` })
-
   try {
     const response = await clientService.httpAuthenticated.request({
       method: 'REPORT',
@@ -1154,15 +1266,26 @@ async function fetchPhotosViaSearch(driveId: string, dateRange: { start: string,
       data: searchBody
     })
 
-    console.log('[Search] Date-filtered response status:', response.status)
     const xmlText = typeof response.data === 'string' ? response.data : new XMLSerializer().serializeToString(response.data)
-    console.log('[Search] Date-filtered response length:', xmlText.length, 'first 500 chars:', xmlText.substring(0, 500))
     const photos = parseSearchResponse(xmlText, spaceId)
-    console.log('[Search] Date-filtered parsed photos:', photos.length)
     return photos
   } catch (err: any) {
-    console.error('[Search] REPORT search-files failed:', err)
-    console.error('[Search] Error response:', err.response?.data, err.response?.status)
+    const status = err.response?.status
+    if (status === 503) {
+      throw new Error('The search service is temporarily unavailable (503 Service Unavailable). The service may be starting up or under maintenance.')
+    }
+    if (status === 502) {
+      throw new Error('The search service is not responding (502 Bad Gateway). Please try again in a moment.')
+    }
+    if (status === 500) {
+      throw new Error('The search service encountered an error (500 Internal Server Error). Please try again.')
+    }
+    if (status === 401 || status === 403) {
+      throw new Error('Authentication error (401 Unauthorized). Your session may have expired.')
+    }
+    if (err.code === 'ECONNREFUSED' || err.message?.includes('Network')) {
+      throw new Error('Unable to connect to the server. Please check your network connection.')
+    }
     throw new Error('Failed to search photos. Please try again.')
   }
 }
@@ -1205,8 +1328,6 @@ async function fetchAllImagesViaSearch(driveId: string): Promise<PhotoWithDate[]
   </d:prop>
 </oc:search-files>`
 
-  console.log('[Search] Fallback request:', { spaceId, pattern })
-
   try {
     const response = await clientService.httpAuthenticated.request({
       method: 'REPORT',
@@ -1217,15 +1338,26 @@ async function fetchAllImagesViaSearch(driveId: string): Promise<PhotoWithDate[]
       data: searchBody
     })
 
-    console.log('[Search] Fallback response status:', response.status)
     const xmlText = typeof response.data === 'string' ? response.data : new XMLSerializer().serializeToString(response.data)
-    console.log('[Search] Fallback response length:', xmlText.length, 'first 500 chars:', xmlText.substring(0, 500))
     const photos = parseSearchResponse(xmlText, spaceId)
-    console.log('[Search] Fallback parsed photos:', photos.length)
     return photos
   } catch (err: any) {
-    console.error('[Search] Fallback search failed:', err)
-    console.error('[Search] Fallback error response:', err.response?.data, err.response?.status)
+    const status = err.response?.status
+    if (status === 503) {
+      throw new Error('The search service is temporarily unavailable (503 Service Unavailable). The service may be starting up or under maintenance.')
+    }
+    if (status === 502) {
+      throw new Error('The search service is not responding (502 Bad Gateway). Please try again in a moment.')
+    }
+    if (status === 500) {
+      throw new Error('The search service encountered an error (500 Internal Server Error). Please try again.')
+    }
+    if (status === 401 || status === 403) {
+      throw new Error('Authentication error (401 Unauthorized). Your session may have expired.')
+    }
+    if (err.code === 'ECONNREFUSED' || err.message?.includes('Network')) {
+      throw new Error('Unable to connect to the server. Please check your network connection.')
+    }
     throw new Error('Failed to search photos. Please try again.')
   }
 }
@@ -1269,8 +1401,6 @@ async function fetchPhotosWithGPS(driveId: string): Promise<PhotoWithDate[]> {
   </d:prop>
 </oc:search-files>`
 
-  console.log('[Map] Fetching all photos with GPS data')
-
   try {
     const response = await clientService.httpAuthenticated.request({
       method: 'REPORT',
@@ -1290,10 +1420,24 @@ async function fetchPhotosWithGPS(driveId: string): Promise<PhotoWithDate[]> {
       return loc?.latitude != null && loc?.longitude != null
     })
 
-    console.log('[Map] Found', photosWithGPS.length, 'photos with GPS out of', allPhotos.length, 'total')
     return photosWithGPS
   } catch (err: any) {
-    console.error('[Map] Failed to fetch photos with GPS:', err)
+    const status = err.response?.status
+    if (status === 503) {
+      throw new Error('The search service is temporarily unavailable (503 Service Unavailable). The service may be starting up or under maintenance.')
+    }
+    if (status === 502) {
+      throw new Error('The search service is not responding (502 Bad Gateway). Please try again in a moment.')
+    }
+    if (status === 500) {
+      throw new Error('The search service encountered an error (500 Internal Server Error). Please try again.')
+    }
+    if (status === 401 || status === 403) {
+      throw new Error('Authentication error (401 Unauthorized). Your session may have expired.')
+    }
+    if (err.code === 'ECONNREFUSED' || err.message?.includes('Network')) {
+      throw new Error('Unable to connect to the server. Please check your network connection.')
+    }
     throw new Error('Failed to load map photos. Please try again.')
   }
 }
@@ -1302,8 +1446,10 @@ async function fetchPhotosWithGPS(driveId: string): Promise<PhotoWithDate[]> {
  * Load photos for the map view
  */
 async function loadMapPhotos() {
-  console.log('[Map] loadMapPhotos called, already loaded:', mapPhotosLoaded.value)
   if (mapPhotosLoaded.value) return  // Already loaded
+
+  // Set flag immediately to prevent concurrent requests (race condition fix)
+  mapPhotosLoaded.value = true
 
   // Find personal space (same pattern as loadPhotos)
   if (!personalSpace) {
@@ -1311,22 +1457,18 @@ async function loadMapPhotos() {
     personalSpace = spaces.find((s: SpaceResource) => s.driveType === 'personal') || null
   }
 
-  console.log('[Map] Got personal space:', personalSpace?.id)
   if (!personalSpace) {
     error.value = 'Could not find personal space'
+    mapPhotosLoaded.value = false  // Reset on error
     return
   }
 
   try {
     loading.value = true
-    console.log('[Map] Fetching photos with GPS...')
     const photos = await fetchPhotosWithGPS(personalSpace.id)
-    console.log('[Map] Got', photos.length, 'photos with GPS')
     mapPhotos.value = photos
-    mapPhotosLoaded.value = true
-    // Note: Pre-fetching happens in PhotoMap after clustering determines representative photos
   } catch (err: any) {
-    console.error('[Map] Error loading map photos:', err)
+    mapPhotosLoaded.value = false  // Reset on error to allow retry
     error.value = err.message || 'Failed to load map photos'
   } finally {
     loading.value = false
@@ -1406,14 +1548,14 @@ async function loadPhotos() {
     oldestLoadedDate.value = new Date(endDate)
     oldestLoadedDate.value.setDate(oldestLoadedDate.value.getDate() + 1)
 
-    currentDateRange.value = 'Loading recent photos...'
+    currentDateRange.value = t('loading.recentPhotos')
 
     // Load initial batch (3 months)
     await loadMorePhotos()
 
     // If no photos found with date filter, try fallback search
     if (allPhotos.value.length === 0 && !useFallbackSearch) {
-      currentDateRange.value = 'Searching all photos...'
+      currentDateRange.value = t('loading.searchingAll')
       useFallbackSearch = true
       const photos = await fetchAllImagesViaSearch(personalSpace.id)
 
@@ -1438,7 +1580,6 @@ async function loadPhotos() {
     }
 
   } catch (err: any) {
-    console.error('Error loading photos:', err)
     error.value = err.message || 'Failed to load photos'
   } finally {
     loading.value = false
@@ -1513,8 +1654,23 @@ async function loadMorePhotos() {
   }
 }
 
-// Cache for blob URLs to avoid refetching
+// Cache for blob URLs to avoid refetching (with LRU eviction)
 const blobUrlCache = new Map<string, string>()
+const MAX_THUMBNAIL_CACHE = 200 // Keep 200 thumbnails in memory
+
+// Evict oldest entries when cache exceeds max size
+function evictOldestThumbnails() {
+  while (blobUrlCache.size > MAX_THUMBNAIL_CACHE) {
+    const firstKey = blobUrlCache.keys().next().value
+    if (firstKey) {
+      const blobUrl = blobUrlCache.get(firstKey)
+      if (blobUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(blobUrl)
+      }
+      blobUrlCache.delete(firstKey)
+    }
+  }
+}
 
 // Request queue to limit concurrent fetches
 const MAX_CONCURRENT_FETCHES = 4
@@ -1600,13 +1756,15 @@ async function doFetch(photo: PhotoWithDate, cacheKey: string) {
     const blob = response.data as Blob
     const blobUrl = URL.createObjectURL(blob)
     blobUrlCache.set(cacheKey, blobUrl)
+    evictOldestThumbnails()
 
     // Trigger reactivity update efficiently (don't recreate array!)
     thumbnailVersion.value++
-  } catch (err) {
+  } catch {
     // Cache a nice placeholder showing file type
     const filename = photo.name || photoPath.split('/').pop() || 'unknown'
     blobUrlCache.set(cacheKey, createPlaceholderSvg(filename))
+    evictOldestThumbnails()
 
     // Trigger reactivity update efficiently
     thumbnailVersion.value++
@@ -1664,22 +1822,6 @@ function closeLightbox() {
   currentPhotoIndex.value = 0
 }
 
-// Breadcrumb navigation functions (DISABLED)
-// function navigateToBreadcrumb(index: number) {
-//   const parts = breadcrumbParts.value.slice(0, index + 1)
-//   selectedFolder.value = '/' + parts.join('/') + '/'
-// }
-
-// function selectFolder(filePath: string) {
-//   // Extract folder from file path (remove filename)
-//   const lastSlash = filePath.lastIndexOf('/')
-//   selectedFolder.value = lastSlash > 0 ? filePath.substring(0, lastSlash + 1) : '/'
-// }
-
-// function clearFolderFilter() {
-//   selectedFolder.value = null
-// }
-
 function handleImageError(event: Event) {
   const img = event.target as HTMLImageElement
   img.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect fill="%23ddd" width="100" height="100"/><text x="50" y="55" text-anchor="middle" fill="%23999" font-size="12">No preview</text></svg>'
@@ -1687,13 +1829,11 @@ function handleImageError(event: Event) {
 
 // Context menu functions
 function openContextMenu(event: MouseEvent, photo: PhotoWithDate) {
-  console.log('[PhotosView] openContextMenu called', event.clientX, event.clientY, photo)
   event.preventDefault()
   event.stopPropagation()
   contextMenuPhoto.value = photo
   contextMenuPosition.value = { x: event.clientX, y: event.clientY }
   contextMenuVisible.value = true
-  console.log('[PhotosView] contextMenuVisible set to', contextMenuVisible.value)
 }
 
 function closeContextMenu() {
@@ -1702,7 +1842,6 @@ function closeContextMenu() {
 }
 
 function handleLightboxAction(action: string, photo: Resource) {
-  console.log('[PhotosView] handleLightboxAction called', action, photo)
   handleContextAction(action, photo as PhotoWithDate)
 }
 
@@ -1741,8 +1880,7 @@ async function downloadPhoto(photo: PhotoWithDate) {
       } as any)
       const blob = response.data as Blob
       url = URL.createObjectURL(blob)
-    } catch (err) {
-      console.error('Failed to download photo:', err)
+    } catch {
       alert('Failed to download photo. Please try again.')
       return
     }
@@ -1799,8 +1937,7 @@ async function copyPhotoLink(photo: PhotoWithDate) {
   try {
     await navigator.clipboard.writeText(shareUrl)
     alert('Link copied to clipboard!')
-  } catch (err) {
-    console.error('Failed to copy link:', err)
+  } catch {
     alert('Failed to copy link. Please try again.')
   }
 }
@@ -1859,8 +1996,7 @@ async function confirmAndDelete(photo: PhotoWithDate) {
         }
       }
     }
-  } catch (err) {
-    console.error('Failed to delete photo:', err)
+  } catch {
     alert('Failed to delete photo. Please try again.')
   }
 }
@@ -2089,6 +2225,86 @@ function injectStyles() {
       color: var(--oc-color-swatch-success-default, #2a7b2a);
     }
     .error { color: var(--oc-color-swatch-danger-default, #c00); }
+    /* Error state styling */
+    .error-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+      text-align: center;
+      min-height: 300px;
+    }
+    .error-icon {
+      color: var(--oc-color-swatch-danger-default, #c00);
+      margin-bottom: 1.5rem;
+      opacity: 0.8;
+    }
+    .error-title {
+      margin: 0 0 0.75rem 0;
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--oc-color-text-default, #333);
+    }
+    .error-message {
+      margin: 0 0 1.5rem 0;
+      font-size: 1rem;
+      color: var(--oc-color-text-muted, #666);
+      max-width: 500px;
+      line-height: 1.5;
+    }
+    .error-suggestions {
+      background: var(--oc-color-background-muted, #f5f5f5);
+      border-radius: 8px;
+      padding: 1rem 1.5rem;
+      margin-bottom: 1.5rem;
+      text-align: left;
+      max-width: 400px;
+    }
+    .suggestions-label {
+      margin: 0 0 0.5rem 0;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--oc-color-text-default, #333);
+    }
+    .error-suggestions ul {
+      margin: 0;
+      padding-left: 1.25rem;
+    }
+    .error-suggestions li {
+      font-size: 0.875rem;
+      color: var(--oc-color-text-muted, #666);
+      margin-bottom: 0.35rem;
+      line-height: 1.4;
+    }
+    .error-suggestions li:last-child {
+      margin-bottom: 0;
+    }
+    .retry-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.5rem;
+      background: var(--oc-color-swatch-primary-default, #0070c0);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.15s;
+    }
+    .retry-button:hover {
+      background: var(--oc-color-swatch-primary-hover, #005a9e);
+      transform: translateY(-1px);
+    }
+    .retry-button:active {
+      transform: translateY(0);
+    }
+    .retry-icon {
+      font-size: 1.2rem;
+      display: inline-block;
+    }
     .empty-state {
       display: flex;
       flex-direction: column;
@@ -2586,24 +2802,37 @@ watch(exifOnly, (newVal) => {
 })
 
 watch(viewType, (newVal) => {
-  console.log('[ViewType] Changed to:', newVal)
   try {
     localStorage.setItem(STORAGE_KEY_VIEW_TYPE, newVal)
-  } catch (e) {
+  } catch {
     // ignore
   }
 
   // Load map photos when switching to map view
   if (newVal === 'map') {
-    console.log('[ViewType] Triggering loadMapPhotos from watcher')
     loadMapPhotos()
   }
 }, { immediate: true })  // Run immediately to handle initial value
 
 onMounted(() => {
-  console.log('[Mount] viewType:', viewType.value)
   injectStyles()
   loadPhotos()
+})
+
+onUnmounted(() => {
+  // Clean up zoom indicator timeout to prevent memory leak
+  if (zoomIndicatorTimeout) {
+    clearTimeout(zoomIndicatorTimeout)
+    zoomIndicatorTimeout = null
+  }
+
+  // Clean up blob URLs from thumbnail cache
+  for (const [, blobUrl] of blobUrlCache) {
+    if (blobUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(blobUrl)
+    }
+  }
+  blobUrlCache.clear()
 })
 </script>
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="photo-stack" @click="$emit('click')">
+  <div v-if="topPhoto" class="photo-stack" @click="$emit('click')">
     <!-- Background images (rotated) -->
     <div
       v-for="(photo, index) in backgroundPhotos"
@@ -44,11 +44,7 @@
 import { computed } from 'vue'
 import type { Resource } from '@ownclouders/web-client'
 import { useI18n } from '../composables/useI18n'
-
-interface PhotoWithDate extends Resource {
-  exifDate?: string
-  exifTime?: string
-}
+import type { PhotoWithDate } from '../types'
 
 const props = defineProps<{
   photos: PhotoWithDate[]

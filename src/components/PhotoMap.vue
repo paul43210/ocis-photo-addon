@@ -4,10 +4,10 @@
       <div ref="mapContainer" class="map-element"></div>
       <div v-if="photosWithGps === 0" class="no-gps-overlay">
         <span class="icon">📍</span>
-        <p>No photos with GPS data found</p>
+        <p>{{ t('empty.noGpsPhotos') }}</p>
       </div>
       <div class="map-stats">
-        {{ visiblePhotosInView.length }} of {{ photosWithGps }} photos in view
+        {{ t('map.photosInView', { visible: visiblePhotosInView.length, total: photosWithGps }) }}
       </div>
     </div>
   </div>
@@ -17,22 +17,14 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'  // Bundle CSS instead of CDN (CSP blocks external stylesheets)
+import type { GeoCoordinates, PhotoWithDate } from '../types'
+import { useI18n } from '../composables/useI18n'
 
-interface GeoCoordinates {
-  latitude?: number
-  longitude?: number
-}
+// Initialize i18n
+const { t } = useI18n()
 
-interface PhotoWithLocation {
-  id: string
-  name: string
-  filePath?: string
-  graphPhoto?: {
-    location?: GeoCoordinates
-    takenDateTime?: string
-  }
-  thumbnailUrl?: string
-}
+// Use PhotoWithDate from types (aliased for clarity in this component)
+type PhotoWithLocation = PhotoWithDate
 
 const props = defineProps<{
   photos: PhotoWithLocation[]
@@ -56,8 +48,18 @@ const visiblePhotosInView = ref<PhotoWithLocation[]>([])
 const STORAGE_KEY_MAP_CENTER = 'photo-addon:map-center'
 const STORAGE_KEY_MAP_ZOOM = 'photo-addon:map-zoom'
 
-// Cluster radius in meters (photos within this distance are grouped)
-// Map view uses 1km clustering for broader geographic grouping
+/**
+ * Cluster radius for geographic grouping (in meters).
+ *
+ * 1000m (1km) chosen because:
+ * - Large enough to group photos from same location (park, neighborhood, venue)
+ * - Small enough to distinguish nearby but separate locations
+ * - Matches typical GPS accuracy (5-15m) with comfortable margin
+ * - Good visual density on map at common zoom levels (10-15)
+ *
+ * Adjust higher (2000m) for sparser photo collections,
+ * or lower (500m) for dense urban photography.
+ */
 const CLUSTER_RADIUS_METERS = 1000
 
 // Get stored map position
@@ -114,20 +116,7 @@ function updateVisiblePhotos() {
   })
 
   visiblePhotosInView.value = visible
-  console.log('[PhotoMap] Visible photos in viewport:', visible.length, 'of', photosWithGps.value)
   emit('visible-count-change', visible.length, photosWithGps.value)
-}
-
-// Calculate distance between two points in meters (Haversine formula)
-function getDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000 // Earth's radius in meters
-  const dLat = (lat2 - lat1) * Math.PI / 180
-  const dLng = (lng2 - lng1) * Math.PI / 180
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-  return R * c
 }
 
 // Cluster photos by geographic proximity
@@ -138,6 +127,29 @@ interface PhotoCluster {
   representativePhoto: PhotoWithLocation // Most recent photo in cluster
 }
 
+/**
+ * Cluster photos by geographic proximity using a spatial grid algorithm.
+ *
+ * Algorithm: O(n) spatial hashing instead of O(n²) pairwise distance comparison
+ *
+ * How it works:
+ * 1. Divide the world into a grid of cells (each ~1km × 1km)
+ * 2. Hash each photo to its grid cell using floor(lat/GRID_SIZE), floor(lng/GRID_SIZE)
+ * 3. All photos in the same cell form one cluster
+ *
+ * Trade-offs:
+ * - Pros: O(n) time complexity, simple implementation, predictable performance
+ * - Cons: Grid boundaries can split nearby photos into different clusters
+ *         (e.g., photos 10m apart but on different sides of a grid line)
+ *
+ * For photo galleries, this trade-off is acceptable because:
+ * - Perfect clustering isn't required (users expect approximate grouping)
+ * - Performance matters more (can have 10,000+ photos)
+ * - 1km cells are large enough that edge cases are rare
+ *
+ * @param photos - Array of photos with GPS coordinates
+ * @returns Array of photo clusters with center coordinates and representative photo
+ */
 function clusterPhotos(photos: PhotoWithLocation[]): PhotoCluster[] {
   const photosWithLocation = photos.filter(p =>
     p.graphPhoto?.location?.latitude != null &&
@@ -146,53 +158,55 @@ function clusterPhotos(photos: PhotoWithLocation[]): PhotoCluster[] {
 
   if (photosWithLocation.length === 0) return []
 
-  const clusters: PhotoCluster[] = []
-  const assigned = new Set<string>()
+  /**
+   * Grid size in degrees. 0.009° ≈ 1km at the equator.
+   *
+   * At different latitudes, 1° longitude varies:
+   * - Equator: 111km
+   * - 45°: 78km
+   * - 60°: 55km
+   *
+   * So 0.009° is roughly 1km at equator, ~0.7km at 45° latitude.
+   * This variance is acceptable for visual clustering purposes.
+   */
+  const GRID_SIZE = 0.009
 
+  // Build spatial grid - O(n): each photo assigned to one cell
+  const grid = new Map<string, PhotoWithLocation[]>()
   for (const photo of photosWithLocation) {
-    const photoId = photo.id
-    if (assigned.has(photoId)) continue
-
     const lat = photo.graphPhoto!.location!.latitude!
     const lng = photo.graphPhoto!.location!.longitude!
+    // Hash to grid cell (integer division via floor)
+    const gridKey = `${Math.floor(lat / GRID_SIZE)},${Math.floor(lng / GRID_SIZE)}`
 
-    // Find all nearby photos not yet assigned
-    const nearby: PhotoWithLocation[] = [photo]
-    assigned.add(photoId)
+    if (!grid.has(gridKey)) grid.set(gridKey, [])
+    grid.get(gridKey)!.push(photo)
+  }
 
-    for (const other of photosWithLocation) {
-      const otherId = other.id
-      if (assigned.has(otherId)) continue
+  // Convert grid cells to clusters
+  const clusters: PhotoCluster[] = []
 
-      const otherLat = other.graphPhoto!.location!.latitude!
-      const otherLng = other.graphPhoto!.location!.longitude!
-      const distance = getDistanceMeters(lat, lng, otherLat, otherLng)
+  for (const [, cellPhotos] of grid) {
+    // Sort by date to select most recent as representative (shown in marker)
+    const photosWithTime = cellPhotos.map(p => ({
+      photo: p,
+      timestamp: p.graphPhoto?.takenDateTime ? new Date(p.graphPhoto.takenDateTime).getTime() : 0
+    }))
+    photosWithTime.sort((a, b) => b.timestamp - a.timestamp)
+    const sortedPhotos = photosWithTime.map(pt => pt.photo)
 
-      if (distance <= CLUSTER_RADIUS_METERS) {
-        nearby.push(other)
-        assigned.add(otherId)
-      }
-    }
-
-    // Sort by date (most recent first) and pick representative
-    nearby.sort((a, b) => {
-      const dateA = a.graphPhoto?.takenDateTime ? new Date(a.graphPhoto.takenDateTime).getTime() : 0
-      const dateB = b.graphPhoto?.takenDateTime ? new Date(b.graphPhoto.takenDateTime).getTime() : 0
-      return dateB - dateA // Most recent first
-    })
-
-    // Calculate cluster center
+    // Calculate centroid (average position) for marker placement
     let sumLat = 0, sumLng = 0
-    for (const p of nearby) {
+    for (const p of sortedPhotos) {
       sumLat += p.graphPhoto!.location!.latitude!
       sumLng += p.graphPhoto!.location!.longitude!
     }
 
     clusters.push({
-      photos: nearby,
-      centerLat: sumLat / nearby.length,
-      centerLng: sumLng / nearby.length,
-      representativePhoto: nearby[0]
+      photos: sortedPhotos,
+      centerLat: sumLat / sortedPhotos.length,
+      centerLng: sumLng / sortedPhotos.length,
+      representativePhoto: sortedPhotos[0]  // Most recent photo shown in popup
     })
   }
 
@@ -389,7 +403,6 @@ function injectTileFixCSS() {
 
 function initMap() {
   if (!mapContainer.value) {
-    console.error('[PhotoMap] No container element')
     return
   }
 
@@ -404,7 +417,6 @@ function initMap() {
     center = storedPosition.center
     initialZoom = storedPosition.zoom
     hadStoredPosition = true
-    console.log('[PhotoMap] Restoring saved position:', center, 'zoom:', initialZoom)
   } else {
     hadStoredPosition = false
     // Find center from photos with GPS, or default to Canada
@@ -459,8 +471,6 @@ function initMap() {
   setTimeout(() => {
     if (map && mapContainer.value) {
       map.invalidateSize()
-      console.log('[PhotoMap] Container size:',
-        mapContainer.value.offsetWidth, 'x', mapContainer.value.offsetHeight)
     }
   }, 100)
 }
@@ -474,7 +484,6 @@ function addPhotoMarkers() {
   if (clusters.length === 0) return
 
   // Pre-fetch thumbnails for representative photos (the ones shown in tooltips)
-  console.log('[PhotoMap] Pre-fetching thumbnails for', clusters.length, 'cluster representatives')
   for (const cluster of clusters) {
     props.getThumbnailUrl(cluster.representativePhoto)
   }
@@ -578,7 +587,6 @@ function addPhotoMarkers() {
 
     // Handle click - open in lightbox with group navigation
     marker.on('click', () => {
-      console.log('[PhotoMap] Cluster clicked:', photoCount, 'photos')
       emit('photo-click', representativePhoto, photos)
     })
 
@@ -636,6 +644,14 @@ onUnmounted(() => {
     map.remove()
     map = null
   }
+  // Clean up any orphaned tooltips
+  const tooltip = document.getElementById('map-center-tooltip')
+  if (tooltip) {
+    tooltip.remove()
+  }
+  // Clean up injected CSS (only if no other PhotoMap instances)
+  // Note: We leave the CSS in place since it's idempotent and shared
+  // Removing it could break other instances if multiple PhotoMaps exist
 })
 </script>
 

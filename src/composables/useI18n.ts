@@ -111,6 +111,34 @@ export interface TranslationKeys {
   'groupMode.week': string
   'groupMode.month': string
   'groupMode.year': string
+
+  // Error titles
+  'error.searchUnavailable': string
+  'error.connection': string
+  'error.storageNotFound': string
+  'error.authentication': string
+  'error.unableToLoad': string
+
+  // Error suggestions
+  'error.thingsToTry': string
+  'error.tryAgain': string
+  'error.searchRestarting': string
+  'error.waitAndRetry': string
+  'error.contactAdmin': string
+  'error.checkConnection': string
+  'error.serverUnavailable': string
+  'error.refreshPage': string
+  'error.storageNotFoundHint': string
+  'error.logOutAndIn': string
+  'error.sessionExpired': string
+
+  // Date source badges
+  'date.exifBadge': string
+  'date.modTimeBadge': string
+
+  // Fallbacks
+  'fallback.untitled': string
+  'fallback.noPreview': string
 }
 
 // English translations (default)
@@ -214,6 +242,34 @@ const en: TranslationKeys = {
   'groupMode.week': 'Week',
   'groupMode.month': 'Month',
   'groupMode.year': 'Year',
+
+  // Error titles
+  'error.searchUnavailable': 'Search Service Unavailable',
+  'error.connection': 'Connection Error',
+  'error.storageNotFound': 'Storage Not Found',
+  'error.authentication': 'Authentication Error',
+  'error.unableToLoad': 'Unable to Load Photos',
+
+  // Error suggestions
+  'error.thingsToTry': 'Things to try:',
+  'error.tryAgain': 'Try Again',
+  'error.searchRestarting': 'The search service may be restarting or under maintenance',
+  'error.waitAndRetry': 'Wait a moment and try again',
+  'error.contactAdmin': 'Contact your administrator if this persists',
+  'error.checkConnection': 'Check your internet connection',
+  'error.serverUnavailable': 'The server may be temporarily unavailable',
+  'error.refreshPage': 'Try refreshing the page',
+  'error.storageNotFoundHint': 'Your personal storage space could not be found',
+  'error.logOutAndIn': 'Try logging out and back in',
+  'error.sessionExpired': 'Your session may have expired',
+
+  // Date source badges
+  'date.exifBadge': '(EXIF)',
+  'date.modTimeBadge': '(Mod time)',
+
+  // Fallbacks
+  'fallback.untitled': 'Untitled',
+  'fallback.noPreview': 'No preview',
 }
 
 // German translations
@@ -261,6 +317,34 @@ const de: Partial<TranslationKeys> = {
   'groupMode.week': 'Woche',
   'groupMode.month': 'Monat',
   'groupMode.year': 'Jahr',
+
+  // Error titles
+  'error.searchUnavailable': 'Suchdienst nicht verfügbar',
+  'error.connection': 'Verbindungsfehler',
+  'error.storageNotFound': 'Speicher nicht gefunden',
+  'error.authentication': 'Authentifizierungsfehler',
+  'error.unableToLoad': 'Fotos konnten nicht geladen werden',
+
+  // Error suggestions
+  'error.thingsToTry': 'Versuchen Sie Folgendes:',
+  'error.tryAgain': 'Erneut versuchen',
+  'error.searchRestarting': 'Der Suchdienst wird möglicherweise neu gestartet',
+  'error.waitAndRetry': 'Warten Sie einen Moment und versuchen Sie es erneut',
+  'error.contactAdmin': 'Kontaktieren Sie Ihren Administrator, wenn das Problem weiterhin besteht',
+  'error.checkConnection': 'Überprüfen Sie Ihre Internetverbindung',
+  'error.serverUnavailable': 'Der Server ist möglicherweise vorübergehend nicht verfügbar',
+  'error.refreshPage': 'Versuchen Sie, die Seite zu aktualisieren',
+  'error.storageNotFoundHint': 'Ihr persönlicher Speicherplatz konnte nicht gefunden werden',
+  'error.logOutAndIn': 'Versuchen Sie, sich ab- und wieder anzumelden',
+  'error.sessionExpired': 'Ihre Sitzung ist möglicherweise abgelaufen',
+
+  // Date source badges
+  'date.exifBadge': '(EXIF)',
+  'date.modTimeBadge': '(Änderungszeit)',
+
+  // Fallbacks
+  'fallback.untitled': 'Unbenannt',
+  'fallback.noPreview': 'Keine Vorschau',
 }
 
 // French translations
@@ -308,6 +392,34 @@ const fr: Partial<TranslationKeys> = {
   'groupMode.week': 'Semaine',
   'groupMode.month': 'Mois',
   'groupMode.year': 'Année',
+
+  // Error titles
+  'error.searchUnavailable': 'Service de recherche indisponible',
+  'error.connection': 'Erreur de connexion',
+  'error.storageNotFound': 'Stockage introuvable',
+  'error.authentication': "Erreur d'authentification",
+  'error.unableToLoad': 'Impossible de charger les photos',
+
+  // Error suggestions
+  'error.thingsToTry': 'Essayez ceci:',
+  'error.tryAgain': 'Réessayer',
+  'error.searchRestarting': 'Le service de recherche est peut-être en cours de redémarrage',
+  'error.waitAndRetry': 'Attendez un moment et réessayez',
+  'error.contactAdmin': 'Contactez votre administrateur si le problème persiste',
+  'error.checkConnection': 'Vérifiez votre connexion Internet',
+  'error.serverUnavailable': 'Le serveur est peut-être temporairement indisponible',
+  'error.refreshPage': 'Essayez de rafraîchir la page',
+  'error.storageNotFoundHint': 'Votre espace de stockage personnel est introuvable',
+  'error.logOutAndIn': 'Essayez de vous déconnecter et de vous reconnecter',
+  'error.sessionExpired': 'Votre session a peut-être expiré',
+
+  // Date source badges
+  'date.exifBadge': '(EXIF)',
+  'date.modTimeBadge': '(Date modif.)',
+
+  // Fallbacks
+  'fallback.untitled': 'Sans titre',
+  'fallback.noPreview': 'Pas d\'aperçu',
 }
 
 // All translations
