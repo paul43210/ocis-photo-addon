@@ -94,6 +94,13 @@ export function usePhotos() {
   }
 
   /**
+   * Unix timestamp threshold: Jan 1, 3000 in seconds.
+   * Values below this are treated as seconds; above as milliseconds.
+   * 32503680000 = new Date('3000-01-01T00:00:00Z').getTime() / 1000
+   */
+  const UNIX_SECONDS_THRESHOLD = 32503680000
+
+  /**
    * Parse various EXIF date formats into a JavaScript Date object.
    *
    * Supported formats (in order of detection):
@@ -103,7 +110,7 @@ export function usePhotos() {
    * 4. EXIF string format: "YYYY:MM:DD HH:MM:SS" (standard EXIF DateTimeOriginal)
    * 5. ISO 8601 or any format parseable by Date constructor
    *
-   * The 32503680000 threshold distinguishes seconds from milliseconds:
+   * The UNIX_SECONDS_THRESHOLD distinguishes seconds from milliseconds:
    * - Values below this are treated as seconds (year 3000 in Unix seconds)
    * - Values above are treated as milliseconds
    *
@@ -115,9 +122,7 @@ export function usePhotos() {
 
     // Format 1 & 2: Unix timestamp (seconds or milliseconds)
     if (typeof value === 'number') {
-      // 32503680000 = Jan 1, 3000 in Unix seconds
-      // If value is less, it's likely seconds; otherwise milliseconds
-      if (value < 32503680000) {
+      if (value < UNIX_SECONDS_THRESHOLD) {
         return new Date(value * 1000)
       }
       return new Date(value)
@@ -190,7 +195,7 @@ export function usePhotos() {
       case 'month':
         return `${year}-${month}`
       case 'week':
-        const weekNum = getISOWeek(date)
+        const weekNum = getISOWeek(date) ?? 1  // Default to week 1 for invalid dates
         return `${year}-W${String(weekNum).padStart(2, '0')}`
       case 'day':
       default:
@@ -214,12 +219,12 @@ export function usePhotos() {
    * 5. Divide by 7 (86400000ms/day) and round up for week number
    *
    * @param date - The date to get the week number for
-   * @returns ISO week number (1-53), or 1 for invalid dates
+   * @returns ISO week number (1-53), or null for invalid dates
    */
-  function getISOWeek(date: Date): number {
-    // Validate input date
+  function getISOWeek(date: Date): number | null {
+    // Validate input date - return null for invalid dates to allow caller to handle
     if (!date || isNaN(date.getTime())) {
-      return 1
+      return null
     }
     // Use UTC to avoid timezone-related date shifts
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
@@ -232,6 +237,29 @@ export function usePhotos() {
     // Calculate week number: days since year start / 7, rounded up
     // 86400000 = milliseconds per day (24 * 60 * 60 * 1000)
     return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
+  }
+
+  /**
+   * Get the start and end dates for a given ISO week.
+   * Shared utility used by formatDateKey.
+   *
+   * @param year - The year
+   * @param week - ISO week number (1-53)
+   * @returns Object with start (Monday) and end (Sunday) dates
+   */
+  function getWeekDateRange(year: number, week: number): { start: Date; end: Date } {
+    // Find January 1st of the year
+    const jan1 = new Date(year, 0, 1)
+    // Calculate the Monday of the first week
+    // ISO weeks start on Monday; Jan 1 could be any day
+    const jan1DayOfWeek = jan1.getDay() || 7  // Convert Sunday (0) to 7
+    // Days to add to get to Monday of week 1
+    const daysToWeek1Monday = (1 - jan1DayOfWeek)
+    // Calculate the Monday of the requested week
+    const startDate = new Date(year, 0, 1 + daysToWeek1Monday + (week - 1) * 7)
+    const endDate = new Date(startDate)
+    endDate.setDate(startDate.getDate() + 6)
+    return { start: startDate, end: endDate }
   }
 
   /**
@@ -253,12 +281,7 @@ export function usePhotos() {
       case 'week': {
         const [year, weekPart] = dateKey.split('-W')
         const weekNum = parseInt(weekPart)
-        const firstDayOfYear = new Date(parseInt(year), 0, 1)
-        const daysOffset = (weekNum - 1) * 7
-        const weekStart = new Date(firstDayOfYear)
-        weekStart.setDate(firstDayOfYear.getDate() + daysOffset - firstDayOfYear.getDay() + 1)
-        const weekEnd = new Date(weekStart)
-        weekEnd.setDate(weekStart.getDate() + 6)
+        const { start: weekStart, end: weekEnd } = getWeekDateRange(parseInt(year), weekNum)
         return `${weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} - ${weekEnd.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`
       }
       case 'day':
@@ -321,6 +344,24 @@ export function usePhotos() {
   }
 
   /**
+   * Validate that a latitude value is within valid range.
+   * @param lat - Latitude value to validate
+   * @returns true if latitude is a valid number in [-90, 90]
+   */
+  function isValidLatitude(lat: number): boolean {
+    return typeof lat === 'number' && !isNaN(lat) && lat >= -90 && lat <= 90
+  }
+
+  /**
+   * Validate that a longitude value is within valid range.
+   * @param lon - Longitude value to validate
+   * @returns true if longitude is a valid number in [-180, 180]
+   */
+  function isValidLongitude(lon: number): boolean {
+    return typeof lon === 'number' && !isNaN(lon) && lon >= -180 && lon <= 180
+  }
+
+  /**
    * Calculate great-circle distance between two GPS coordinates using the Haversine formula.
    *
    * The Haversine formula calculates the shortest distance over the Earth's surface
@@ -337,9 +378,17 @@ export function usePhotos() {
    * @param lon1 - Longitude of first point in degrees
    * @param lat2 - Latitude of second point in degrees
    * @param lon2 - Longitude of second point in degrees
-   * @returns Distance in meters
+   * @returns Distance in meters, or Infinity for invalid coordinates
    */
   function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    // Validate coordinate ranges - return Infinity for invalid to prevent clustering
+    if (!isValidLatitude(lat1) || !isValidLatitude(lat2)) {
+      return Infinity
+    }
+    if (!isValidLongitude(lon1) || !isValidLongitude(lon2)) {
+      return Infinity
+    }
+
     // Earth's mean radius in meters (WGS84 approximation)
     const R = 6371000
     // Convert degree differences to radians

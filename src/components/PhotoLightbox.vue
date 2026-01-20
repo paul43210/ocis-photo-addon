@@ -316,12 +316,32 @@ function evictOldestFromCache(cache: Map<string, string>, maxSize: number) {
     if (firstKey) {
       const blobUrl = cache.get(firstKey)
       // Revoke blob URL to release memory (browser doesn't auto-cleanup)
-      if (blobUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(blobUrl)
-      }
+      revokeBlobUrl(blobUrl)
       cache.delete(firstKey)
     }
   }
+}
+
+/**
+ * Safely revoke a blob URL if it's a valid blob URL.
+ * Extracted to avoid duplication across cleanup functions.
+ *
+ * @param url - The URL to potentially revoke
+ */
+function revokeBlobUrl(url: string | undefined): void {
+  if (url?.startsWith('blob:')) {
+    URL.revokeObjectURL(url)
+  }
+}
+
+/**
+ * Clear all entries from a blob URL cache, revoking each URL.
+ *
+ * @param cache - Map of IDs to blob URLs
+ */
+function clearBlobCache(cache: Map<string, string>): void {
+  cache.forEach(revokeBlobUrl)
+  cache.clear()
 }
 
 // Frame dimensions - calculated once when lightbox opens based on stack
@@ -690,21 +710,9 @@ async function preloadNearbyImages(photos: PhotoWithDate[], currentIdx: number) 
 }
 
 function close() {
-  // Clean up all cached blob URLs
-  imageCache.value.forEach((blobUrl) => {
-    if (blobUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(blobUrl)
-    }
-  })
-  imageCache.value.clear()
-
-  // Clean up preview cache
-  previewCache.value.forEach((blobUrl) => {
-    if (blobUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(blobUrl)
-    }
-  })
-  previewCache.value.clear()
+  // Clean up all cached blob URLs using shared helper
+  clearBlobCache(imageCache.value)
+  clearBlobCache(previewCache.value)
 
   emit('close')
 }
@@ -826,21 +834,9 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown)
   document.body.style.overflow = ''
   document.documentElement.style.overflow = ''
-  // Clean up all cached blob URLs
-  imageCache.value.forEach((blobUrl) => {
-    if (blobUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(blobUrl)
-    }
-  })
-  imageCache.value.clear()
-
-  // Clean up preview cache
-  previewCache.value.forEach((blobUrl) => {
-    if (blobUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(blobUrl)
-    }
-  })
-  previewCache.value.clear()
+  // Clean up all cached blob URLs using shared helper
+  clearBlobCache(imageCache.value)
+  clearBlobCache(previewCache.value)
 })
 
 // formatSize is imported from usePhotos composable

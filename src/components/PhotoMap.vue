@@ -26,10 +26,15 @@ const { t } = useI18n()
 // Use PhotoWithDate from types (aliased for clarity in this component)
 type PhotoWithLocation = PhotoWithDate
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   photos: PhotoWithLocation[]
   getThumbnailUrl: (photo: PhotoWithLocation) => string
-}>()
+  defaultCenter?: [number, number]
+  defaultZoom?: number
+}>(), {
+  defaultCenter: () => [56, -96],  // Canada default (configurable via props)
+  defaultZoom: 4
+})
 
 const emit = defineEmits<{
   (e: 'photo-click', photo: PhotoWithLocation, group: PhotoWithLocation[]): void
@@ -40,6 +45,30 @@ const mapContainer = ref<HTMLElement | null>(null)
 let map: L.Map | null = null
 let resizeObserver: ResizeObserver | null = null
 let hadStoredPosition = false  // Track if we restored from localStorage
+let activeTooltip: HTMLElement | null = null  // Track active tooltip for cleanup
+
+/**
+ * Escape HTML special characters for safe text content.
+ * Uses the browser's built-in escaping via textContent → innerHTML.
+ */
+function escapeHtml(str: string): string {
+  const div = document.createElement('div')
+  div.textContent = str
+  return div.innerHTML
+}
+
+/**
+ * Escape HTML special characters for use in attributes.
+ * More comprehensive than escapeHtml to handle attribute context.
+ */
+function escapeAttr(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
 
 // Visible photos in current viewport
 const visiblePhotosInView = ref<PhotoWithLocation[]>([])
@@ -425,8 +454,8 @@ function initMap() {
       p.graphPhoto?.location?.longitude != null
     )
 
-    center = [56, -96] // Canada default
-    initialZoom = 4
+    center = props.defaultCenter
+    initialZoom = props.defaultZoom
 
     if (photosWithLocation.length > 0) {
       const first = photosWithLocation[0]
@@ -513,29 +542,33 @@ function addPhotoMarkers() {
       ? new Date(photo.graphPhoto.takenDateTime).toLocaleDateString()
       : ''
 
-    // Escape special chars for HTML attributes
-    const safeName = photo.name.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const countBadge = photoCount > 1 ? '<span class="tooltip-count">' + photoCount + ' photos</span>' : ''
+    // Escape content for safe HTML rendering
+    const safeName = escapeHtml(photo.name || '')
+    const safeDateStr = dateStr ? escapeHtml(dateStr) : ''
+    const countBadge = photoCount > 1 ? `<span class="tooltip-count">${photoCount} photos</span>` : ''
 
-    // Helper to build tooltip HTML with current thumbnail URL
+    // Helper to build tooltip HTML with current thumbnail URL (properly escaped)
     const buildTooltipHtml = () => {
       const currentUrl = props.getThumbnailUrl(photo)
-      const safeSrc = currentUrl.replace(/"/g, '%22').replace(/</g, '%3C').replace(/>/g, '%3E')
-      return '<div class="map-photo-tooltip">' +
-        '<img src="' + safeSrc + '" alt="' + safeName + '">' +
-        '<div class="tooltip-info">' +
-        countBadge +
-        '<span class="tooltip-name">' + safeName + '</span>' +
-        (dateStr ? '<span class="tooltip-date">' + dateStr + '</span>' : '') +
-        '</div></div>'
+      const safeSrc = escapeAttr(currentUrl)
+      return `<div class="map-photo-tooltip">
+        <img src="${safeSrc}" alt="${escapeAttr(photo.name || '')}">
+        <div class="tooltip-info">
+          ${countBadge}
+          <span class="tooltip-name">${safeName}</span>
+          ${safeDateStr ? `<span class="tooltip-date">${safeDateStr}</span>` : ''}
+        </div>
+      </div>`
     }
 
     // Show tooltip based on quadrant - opposite corner from mouse
     const gap = 15
     marker.on('mouseover', (e: L.LeafletMouseEvent) => {
-      // Remove any existing tooltip
-      const existing = document.getElementById('map-center-tooltip')
-      if (existing) existing.remove()
+      // Remove any existing tooltip using ref
+      if (activeTooltip) {
+        activeTooltip.remove()
+        activeTooltip = null
+      }
 
       // Get map container bounds
       const container = mapContainer.value
@@ -551,7 +584,7 @@ function addPhotoMarkers() {
       const inTopHalf = markerPoint.y < rect.height / 2
       const inLeftHalf = markerPoint.x < rect.width / 2
 
-      // Create tooltip
+      // Create tooltip and track via ref
       const tooltip = document.createElement('div')
       tooltip.id = 'map-center-tooltip'
       tooltip.innerHTML = buildTooltipHtml()
@@ -577,12 +610,15 @@ function addPhotoMarkers() {
         tooltip.style.bottom = (window.innerHeight - markerScreenY + radius + gap) + 'px'
       }
 
+      activeTooltip = tooltip
       document.body.appendChild(tooltip)
     })
 
     marker.on('mouseout', () => {
-      const tooltip = document.getElementById('map-center-tooltip')
-      if (tooltip) tooltip.remove()
+      if (activeTooltip) {
+        activeTooltip.remove()
+        activeTooltip = null
+      }
     })
 
     // Handle click - open in lightbox with group navigation
@@ -644,10 +680,10 @@ onUnmounted(() => {
     map.remove()
     map = null
   }
-  // Clean up any orphaned tooltips
-  const tooltip = document.getElementById('map-center-tooltip')
-  if (tooltip) {
-    tooltip.remove()
+  // Clean up any orphaned tooltips using tracked ref
+  if (activeTooltip) {
+    activeTooltip.remove()
+    activeTooltip = null
   }
   // Clean up injected CSS (only if no other PhotoMap instances)
   // Note: We leave the CSS in place since it's idempotent and shared

@@ -433,6 +433,23 @@ const translations: Record<Locale, TranslationKeys | Partial<TranslationKeys>> =
 // Current locale (reactive)
 const currentLocale = ref<Locale>('en')
 
+// Cache for compiled regex patterns (avoids creating new RegExp on every translation call)
+const paramRegexCache = new Map<string, RegExp>()
+
+/**
+ * Get a cached regex for parameter substitution.
+ * Avoids creating a new RegExp on every translation call.
+ * @param param - The parameter name to match (e.g., "count" matches "{count}")
+ */
+function getParamRegex(param: string): RegExp {
+  let regex = paramRegexCache.get(param)
+  if (!regex) {
+    regex = new RegExp(`\\{${param}\\}`, 'g')
+    paramRegexCache.set(param, regex)
+  }
+  return regex
+}
+
 /**
  * Detect browser locale
  */
@@ -467,12 +484,21 @@ export function useI18n() {
    */
   function t(key: keyof TranslationKeys, params?: Record<string, string | number>): string {
     const localeTranslations = translations[currentLocale.value]
-    let text = (localeTranslations as any)[key] || (translations.en as any)[key] || key
+    const localeText = (localeTranslations as any)[key]
+    const fallbackText = (translations.en as any)[key]
+    let text = localeText || fallbackText || key
 
-    // Parameter substitution: {name} -> value
+    // Warn in development if translation is missing for non-English locale
+    if (import.meta.env.DEV && !localeText && currentLocale.value !== 'en') {
+      console.warn(`Missing ${currentLocale.value} translation for: ${key}`)
+    }
+
+    // Parameter substitution: {name} -> value (using cached regex)
     if (params) {
       for (const [param, value] of Object.entries(params)) {
-        text = text.replace(new RegExp(`\\{${param}\\}`, 'g'), String(value))
+        const regex = getParamRegex(param)
+        regex.lastIndex = 0  // Reset for global regex
+        text = text.replace(regex, String(value))
       }
     }
 

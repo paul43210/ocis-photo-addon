@@ -34,21 +34,54 @@ export interface EnrichedPhoto extends Resource {
 }
 
 /**
- * Parse Google Photos JSON sidecar content
+ * Validate that an object has a valid timestamp structure.
+ */
+function isValidTimestamp(obj: unknown): obj is { timestamp: string; formatted?: string } {
+  return typeof obj === 'object' &&
+    obj !== null &&
+    'timestamp' in obj &&
+    typeof (obj as any).timestamp === 'string'
+}
+
+/**
+ * Validate that an object has valid GeoData structure.
+ */
+function isValidGeoData(obj: unknown): obj is GeoData {
+  return typeof obj === 'object' &&
+    obj !== null &&
+    typeof (obj as any).latitude === 'number' &&
+    typeof (obj as any).longitude === 'number'
+}
+
+/**
+ * Parse Google Photos JSON sidecar content with validation.
+ * Validates that the parsed JSON is a proper object and has expected structure.
  */
 export function parseSidecarJson(jsonContent: string): PhotoMetadata | null {
   try {
     const data = JSON.parse(jsonContent)
+
+    // Validate that data is a non-null object (not array, string, number, etc.)
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      if (import.meta.env.DEV) {
+        console.warn('Sidecar JSON is not a valid object')
+      }
+      return null
+    }
+
+    // Type-safe extraction with validation
     return {
-      title: data.title,
-      description: data.description,
-      photoTakenTime: data.photoTakenTime,
-      geoData: data.geoData,
-      geoDataExif: data.geoDataExif,
-      creationTime: data.creationTime
+      title: typeof data.title === 'string' ? data.title : undefined,
+      description: typeof data.description === 'string' ? data.description : undefined,
+      photoTakenTime: isValidTimestamp(data.photoTakenTime) ? data.photoTakenTime : undefined,
+      geoData: isValidGeoData(data.geoData) ? data.geoData : undefined,
+      geoDataExif: isValidGeoData(data.geoDataExif) ? data.geoDataExif : undefined,
+      creationTime: isValidTimestamp(data.creationTime) ? data.creationTime : undefined
     }
   } catch (e) {
-    console.warn('Failed to parse sidecar JSON:', e)
+    if (import.meta.env.DEV) {
+      console.warn('Failed to parse sidecar JSON:', e)
+    }
     return null
   }
 }
@@ -140,7 +173,13 @@ export function getPhotoLocation(photo: EnrichedPhoto): GeoData | null {
 }
 
 /**
- * Build a map of sidecar files to their paths
+ * Build a map of sidecar files keyed by lowercase image filename.
+ *
+ * IMPORTANT: Keys are normalized to lowercase for case-insensitive matching.
+ * Use findSidecar() for lookups to ensure proper case normalization.
+ *
+ * @param files - Array of Resource objects to scan for sidecar files
+ * @returns Map with lowercase image names as keys and sidecar Resources as values
  */
 export function buildSidecarMap(files: Resource[]): Map<string, Resource> {
   const sidecarMap = new Map<string, Resource>()
@@ -149,13 +188,28 @@ export function buildSidecarMap(files: Resource[]): Map<string, Resource> {
     if (file.name && isSidecarFile(file.name)) {
       const imageName = getImageFromSidecar(file.name)
       if (imageName) {
-        // Key by the image name (without path) for easy lookup
+        // Key by lowercase for case-insensitive matching
         sidecarMap.set(imageName.toLowerCase(), file)
       }
     }
   }
 
   return sidecarMap
+}
+
+/**
+ * Look up sidecar file for an image (handles case normalization).
+ * Use this instead of directly accessing the map to ensure consistent case handling.
+ *
+ * @param sidecarMap - Map built by buildSidecarMap
+ * @param imageName - The image filename to look up
+ * @returns The sidecar Resource if found, undefined otherwise
+ */
+export function findSidecar(
+  sidecarMap: Map<string, Resource>,
+  imageName: string
+): Resource | undefined {
+  return sidecarMap.get(imageName.toLowerCase())
 }
 
 export function useSidecar() {
@@ -166,6 +220,7 @@ export function useSidecar() {
     getImageFromSidecar,
     getPhotoDate,
     getPhotoLocation,
-    buildSidecarMap
+    buildSidecarMap,
+    findSidecar
   }
 }

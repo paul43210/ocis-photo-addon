@@ -185,8 +185,7 @@ import type {
   PhotoWithDate,
   PhotoSubGroup,
   GroupMode,
-  ViewType,
-  IMAGE_EXTENSIONS as IMAGE_EXTENSIONS_TYPE
+  ViewType
 } from '../types'
 import { IMAGE_EXTENSIONS } from '../types'
 
@@ -254,7 +253,7 @@ const exifOnly = ref(getStoredExifOnly())
 
 // Pinch-to-zoom state
 const showZoomIndicator = ref(false)
-let zoomIndicatorTimeout: number | null = null
+let zoomIndicatorTimeout: ReturnType<typeof setTimeout> | null = null
 let initialPinchDistance = 0
 let isPinching = false
 
@@ -283,9 +282,12 @@ function getTouchDistance(touches: TouchList): number {
 // Show zoom feedback indicator
 function showZoomFeedback() {
   showZoomIndicator.value = true
-  if (zoomIndicatorTimeout) clearTimeout(zoomIndicatorTimeout)
-  zoomIndicatorTimeout = window.setTimeout(() => {
+  if (zoomIndicatorTimeout !== null) {
+    clearTimeout(zoomIndicatorTimeout)
+  }
+  zoomIndicatorTimeout = setTimeout(() => {
     showZoomIndicator.value = false
+    zoomIndicatorTimeout = null  // Clear reference after execution
   }, 800)
 }
 
@@ -339,6 +341,9 @@ function handlePinchStart(event: TouchEvent) {
 function handlePinchMove(event: TouchEvent) {
   if (viewType.value !== 'calendar') return
   if (!isPinching || event.touches.length !== 2) return
+
+  // Prevent browser pinch-zoom during gesture
+  event.preventDefault()
 
   const currentDistance = getTouchDistance(event.touches)
   const ratio = currentDistance / initialPinchDistance
@@ -428,6 +433,7 @@ const isCurrentMonth = computed(() => {
 })
 
 // Store personal space reference for thumbnail generation
+// Not reactive - only set once during initial load and cached for subsequent operations
 let personalSpace: SpaceResource | null = null
 
 /**
@@ -1442,37 +1448,48 @@ async function fetchPhotosWithGPS(driveId: string): Promise<PhotoWithDate[]> {
   }
 }
 
+// Promise reference for true mutex on map photo loading
+let mapPhotosLoadingPromise: Promise<void> | null = null
+
 /**
- * Load photos for the map view
+ * Load photos for the map view (with true mutex to prevent concurrent requests)
  */
 async function loadMapPhotos() {
-  if (mapPhotosLoaded.value) return  // Already loaded
+  // Already loaded successfully
+  if (mapPhotosLoaded.value) return
 
-  // Set flag immediately to prevent concurrent requests (race condition fix)
-  mapPhotosLoaded.value = true
+  // Return existing promise if already loading (true mutex)
+  if (mapPhotosLoadingPromise) return mapPhotosLoadingPromise
 
-  // Find personal space (same pattern as loadPhotos)
-  if (!personalSpace) {
-    const spaces = spacesStore.spaces
-    personalSpace = spaces.find((s: SpaceResource) => s.driveType === 'personal') || null
-  }
+  mapPhotosLoadingPromise = (async () => {
+    try {
+      loading.value = true
 
-  if (!personalSpace) {
-    error.value = 'Could not find personal space'
-    mapPhotosLoaded.value = false  // Reset on error
-    return
-  }
+      // Find personal space (same pattern as loadPhotos)
+      if (!personalSpace) {
+        const spaces = spacesStore.spaces
+        personalSpace = spaces.find((s: SpaceResource) => s.driveType === 'personal') || null
+      }
 
-  try {
-    loading.value = true
-    const photos = await fetchPhotosWithGPS(personalSpace.id)
-    mapPhotos.value = photos
-  } catch (err: any) {
-    mapPhotosLoaded.value = false  // Reset on error to allow retry
-    error.value = err.message || 'Failed to load map photos'
-  } finally {
-    loading.value = false
-  }
+      if (!personalSpace) {
+        error.value = 'Could not find personal space'
+        return
+      }
+
+      const photos = await fetchPhotosWithGPS(personalSpace.id)
+      mapPhotos.value = photos
+      mapPhotosLoaded.value = true
+
+    } catch (err: any) {
+      error.value = err.message || 'Failed to load map photos'
+      // Don't set mapPhotosLoaded - leave false to allow retry
+    } finally {
+      loading.value = false
+      mapPhotosLoadingPromise = null  // Clear promise reference
+    }
+  })()
+
+  return mapPhotosLoadingPromise
 }
 
 // Track loaded date ranges to avoid duplicate fetches
@@ -1674,6 +1691,7 @@ function evictOldestThumbnails() {
 
 // Request queue to limit concurrent fetches
 const MAX_CONCURRENT_FETCHES = 4
+const MAX_QUEUE_SIZE = 50  // Limit queue to prevent memory exhaustion on fast scroll
 let activeFetches = 0
 const fetchQueue: Array<{ photo: PhotoWithDate, cacheKey: string }> = []
 const pendingFetches = new Set<string>()
@@ -1692,6 +1710,15 @@ function getPhotoUrl(photo: Resource): string {
 
   // Queue the fetch if not already pending
   if (!pendingFetches.has(cacheKey)) {
+    // Limit queue size - drop oldest (stale) requests if full
+    // This prevents memory exhaustion when user scrolls quickly
+    while (fetchQueue.length >= MAX_QUEUE_SIZE) {
+      const dropped = fetchQueue.shift()
+      if (dropped) {
+        pendingFetches.delete(dropped.cacheKey)
+      }
+    }
+
     pendingFetches.add(cacheKey)
     fetchQueue.push({ photo: p, cacheKey })
     processQueue()
@@ -2002,7 +2029,8 @@ async function confirmAndDelete(photo: PhotoWithDate) {
 }
 
 function injectStyles() {
-  const styleId = 'photo-addon-styles'
+  // Unique scoped ID to avoid conflicts with other extensions/apps
+  const styleId = 'ocis-photo-addon-v1-styles'
   if (document.getElementById(styleId)) return
 
   const style = document.createElement('style')
@@ -2144,61 +2172,6 @@ function injectStyles() {
       color: var(--oc-color-text-default, #333);
       white-space: nowrap;
     }
-    /* Breadcrumb Navigation (DISABLED)
-    .breadcrumb-nav {
-      display: flex;
-      align-items: center;
-      gap: 0.25rem;
-      padding: 0.5rem 0;
-      flex-wrap: wrap;
-      font-size: 0.875rem;
-    }
-    .breadcrumb-item {
-      background: none;
-      border: none;
-      color: var(--oc-color-swatch-primary-default, #0070c0);
-      cursor: pointer;
-      padding: 0.25rem 0.5rem;
-      border-radius: 4px;
-      transition: background 0.15s;
-      font-size: 0.875rem;
-    }
-    .breadcrumb-item:hover {
-      background: var(--oc-color-background-muted, #f0f0f0);
-    }
-    .breadcrumb-item.active {
-      color: var(--oc-color-text-default, #333);
-      font-weight: 600;
-      cursor: default;
-    }
-    .breadcrumb-item.active:hover {
-      background: none;
-    }
-    .breadcrumb-separator {
-      color: var(--oc-color-text-muted, #999);
-    }
-    .folder-filter-btn {
-      position: absolute;
-      top: 0.25rem;
-      left: 0.25rem;
-      background: rgba(0, 0, 0, 0.5);
-      border: none;
-      border-radius: 4px;
-      padding: 0.25rem 0.35rem;
-      cursor: pointer;
-      opacity: 0;
-      transition: opacity 0.2s;
-      font-size: 0.75rem;
-      line-height: 1;
-      z-index: 5;
-    }
-    .folder-filter-btn:hover {
-      background: rgba(0, 0, 0, 0.7);
-    }
-    .photo-item:hover .folder-filter-btn {
-      opacity: 1;
-    }
-    */
     .photo-count, .loading-status {
       color: var(--oc-color-text-muted, #666);
       margin: 0;
@@ -2821,7 +2794,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   // Clean up zoom indicator timeout to prevent memory leak
-  if (zoomIndicatorTimeout) {
+  if (zoomIndicatorTimeout !== null) {
     clearTimeout(zoomIndicatorTimeout)
     zoomIndicatorTimeout = null
   }
