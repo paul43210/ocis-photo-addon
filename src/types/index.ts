@@ -103,6 +103,7 @@ export interface GraphResponse {
  */
 export interface PhotoWithDate extends Resource {
   fileId?: string         // Unique ID (from oc:fileid or generated)
+  spaceId?: string        // Space the photo lives in, from its href (may differ from queried space)
   filePath?: string       // e.g., "/Photos/2024/January/IMG_001.jpg"
   webDavPath?: string     // e.g., "/dav/spaces/spaceid/Photos/..."
   exifDate?: string       // "YYYY-MM-DD" for display

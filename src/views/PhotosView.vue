@@ -179,6 +179,7 @@ import PhotoContextMenu from '../components/PhotoContextMenu.vue'
 import PhotoMap from '../components/PhotoMap.vue'
 import { usePhotos } from '../composables/usePhotos'
 import { useI18n } from '../composables/useI18n'
+import { parseSpaceHref, buildDavUrl } from '../composables/useDavPath'
 import type {
   GeoCoordinates,
   GraphPhoto,
@@ -1043,7 +1044,7 @@ function parseExifDate(dateStr: string): { date: string, time: string, timestamp
  * ```
  *
  * @param xmlText - Raw XML response from WebDAV REPORT request
- * @param spaceId - Storage space ID for constructing photo paths
+ * @param spaceId - Queried space ID, fallback when href has no space segment
  * @returns Array of PhotoWithDate objects with extracted metadata
  */
 function parseSearchResponse(xmlText: string, spaceId: string): PhotoWithDate[] {
@@ -1068,7 +1069,14 @@ function parseSearchResponse(xmlText: string, spaceId: string): PhotoWithDate[] 
       const hrefEl = response.getElementsByTagNameNS('DAV:', 'href')[0]
       if (!hrefEl?.textContent) continue
 
-      const href = decodeURIComponent(hrefEl.textContent)
+      const rawHref = hrefEl.textContent
+      const href = decodeURIComponent(rawHref)
+
+      // Space id must come from the href: search results may belong to a
+      // space other than the queried one. Parse the raw href so encoded
+      // space ids survive the split.
+      const spaceHref = parseSpaceHref(rawHref)
+      const photoSpaceId = spaceHref?.spaceId || spaceId
 
       // Extract filename from path
       const pathParts = href.split('/')
@@ -1160,23 +1168,14 @@ function parseSearchResponse(xmlText: string, spaceId: string): PhotoWithDate[] 
         continue // Skip if no date available
       }
 
-      // Extract file path from href
-      // href format: /dav/spaces/{spaceId}/path/to/file.jpg
-      const spacePrefix = `/dav/spaces/${spaceId}`
-      let filePath = href
-      if (href.startsWith(spacePrefix)) {
-        filePath = href.substring(spacePrefix.length)
-      }
-      // Also handle URL-encoded space prefix
-      const encodedSpacePrefix = `/dav/spaces/${encodeURIComponent(spaceId)}`
-      if (href.startsWith(encodedSpacePrefix)) {
-        filePath = href.substring(encodedSpacePrefix.length)
-      }
+      // Space-relative path; href format: /dav/spaces/{spaceId}/path/to/file.jpg
+      const filePath = spaceHref?.path || href
 
       // Create PhotoWithDate object
       const photoResource: PhotoWithDate = {
-        id: fileId || `${spaceId}!${fileName}`,
+        id: fileId || `${photoSpaceId}!${fileName}`,
         fileId: fileId,
+        spaceId: photoSpaceId,
         name: fileName,
         filePath: filePath,
         webDavPath: href,
@@ -1766,14 +1765,17 @@ async function doFetch(photo: PhotoWithDate, cacheKey: string) {
   if (blobUrlCache.has(cacheKey)) return
 
   const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
-  if (!personalSpace) return
 
-  const spaceId = personalSpace.id
+  const spaceId = photo.spaceId || personalSpace?.id
   const photoPath = photo.filePath || photo.name || ''
-  if (!photoPath) return
+  if (!spaceId || !photoPath) return
 
-  const encodedPath = photoPath.split('/').map(segment => encodeURIComponent(segment)).join('/')
-  const url = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}?preview=1&x=256&y=256&a=1`
+  const url = buildDavUrl(serverUrl, spaceId, photoPath, {
+    preview: '1',
+    x: '256',
+    y: '256',
+    a: '1'
+  })
 
   try {
     const response = await clientService.httpAuthenticated.get(url, {
@@ -1896,10 +1898,9 @@ async function downloadPhoto(photo: PhotoWithDate) {
   if (!url || url.startsWith('data:')) {
     // Fetch full image if not cached or is placeholder
     const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
-    const spaceId = personalSpace?.id || ''
+    const spaceId = photo.spaceId || personalSpace?.id || ''
     const photoPath = (photo as any).filePath || photo.name || ''
-    const encodedPath = photoPath.split('/').map((s: string) => encodeURIComponent(s)).join('/')
-    const fetchUrl = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
+    const fetchUrl = buildDavUrl(serverUrl, spaceId, photoPath)
 
     try {
       const response = await clientService.httpAuthenticated.get(fetchUrl, {
@@ -1926,8 +1927,9 @@ function openInFiles(photo: PhotoWithDate) {
   const fileId = (photo as any).fileId || photo.id || ''
   const filePath = (photo as any).filePath || photo.name || ''
 
-  // Get the drive alias (e.g., "personal/paul")
-  const driveAlias = (personalSpace as any)?.driveAlias || 'personal/home'
+  // Alias of the space the photo lives in (e.g., "personal/paul")
+  const space = spacesStore.spaces.find((s: SpaceResource) => s.id === photo.spaceId)
+  const driveAlias = space?.driveAlias || personalSpace?.driveAlias || 'personal/home'
 
   // Build the full path for preview URL: driveAlias + filePath
   const fullPath = `${driveAlias}${filePath}`
@@ -1975,12 +1977,11 @@ async function confirmAndDelete(photo: PhotoWithDate) {
 
   try {
     const serverUrl = (configStore.serverUrl || '').replace(/\/$/, '')
-    const spaceId = personalSpace?.id || ''
+    const spaceId = photo.spaceId || personalSpace?.id || ''
     const filePath = (photo as any).filePath || photo.name || ''
-    const encodedPath = filePath.split('/').map((s: string) => encodeURIComponent(s)).join('/')
 
     await clientService.httpAuthenticated.delete(
-      `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
+      buildDavUrl(serverUrl, spaceId, filePath)
     )
 
     // Remove from local state

@@ -193,6 +193,7 @@ import { useClientService, useConfigStore } from '@ownclouders/web-pkg'
 import type { Resource } from '@ownclouders/web-client'
 import { usePhotos } from '../composables/usePhotos'
 import { useI18n } from '../composables/useI18n'
+import { parseSpaceHref, buildDavUrl } from '../composables/useDavPath'
 import type { GeoCoordinates, GraphPhoto, PhotoWithDate } from '../types'
 
 // Initialize composable for shared utility functions
@@ -533,7 +534,12 @@ function getPhotoUrl(photo: PhotoWithDate, preview = false): string | null {
   const filePath = (photo as any).filePath || (photo as any).path || photo.name || ''
   if (!filePath) return null
 
-  let spaceId = (photo as any).parentReference?.driveId || ''
+  // Space id from the photo itself; personal space must never be assumed
+  const spaceHref = photo.webDavPath ? parseSpaceHref(photo.webDavPath) : null
+  let spaceId = photo.spaceId
+    || spaceHref?.spaceId
+    || (photo as any).parentReference?.driveId
+    || ''
   if (!spaceId && photo.id) {
     const idParts = photo.id.split('!')
     if (idParts.length > 0) {
@@ -542,8 +548,7 @@ function getPhotoUrl(photo: PhotoWithDate, preview = false): string | null {
   }
   if (!spaceId) return null
 
-  const encodedPath = filePath.split('/').map((segment: string) => encodeURIComponent(segment)).join('/')
-  const baseUrl = `${serverUrl}/dav/spaces/${encodeURIComponent(spaceId)}${encodedPath}`
+  const baseUrl = buildDavUrl(serverUrl, spaceId, filePath)
 
   if (preview) {
     // Request preview matching lightbox frame dimensions with aspect ratio preserved
